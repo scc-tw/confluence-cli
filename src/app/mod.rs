@@ -3,11 +3,12 @@ use crate::api::{
     CommentSummary, ConfluenceApi, ContentProperty, CreatePageRequest, MovePageRequest, PageBody,
     PageSummary, SpaceSummary, UpdatePageRequest,
 };
-use crate::config::{ResolveOptions, RuntimeConfig, load_runtime};
+use crate::config::{ResolveOptions, RuntimeConfig, load_runtime_with_store};
 use crate::convert::{
     apply_unified_patch, build_bundle_metadata, convert_text, export_bundle_file,
 };
 use crate::domain::{BodyFormat, CommentLocation, DeleteMode, MoveTarget, PageId, PageRef};
+use crate::secret::{KeyringSecretStore, SecretStore};
 use crate::support::{ConfluenceCliError, Result};
 use serde_json::Value;
 use std::fs;
@@ -27,8 +28,16 @@ pub struct PageExportResult {
 
 impl RuntimeContext {
     pub fn load(options: &ResolveOptions) -> Result<Self> {
+        let store = KeyringSecretStore;
+        Self::load_with_store(options, &store)
+    }
+
+    pub fn load_with_store(
+        options: &ResolveOptions,
+        secret_store: &dyn SecretStore,
+    ) -> Result<Self> {
         Ok(Self {
-            runtime_config: load_runtime(options)?,
+            runtime_config: load_runtime_with_store(options, Some(secret_store))?,
         })
     }
 }
@@ -378,6 +387,16 @@ pub fn comment_list<A: ConfluenceApi>(
     api.list_comments(page, location)
 }
 
+pub fn comment_info<A: ConfluenceApi>(api: &A, comment_id: &str) -> Result<CommentSummary> {
+    if comment_id.trim().is_empty() {
+        return Err(ConfluenceCliError::Config(
+            "comment info requires a non-empty comment id".to_owned(),
+        ));
+    }
+
+    api.get_comment(comment_id)
+}
+
 pub fn comment_create<A: ConfluenceApi>(
     api: &A,
     page: &PageRef,
@@ -415,6 +434,26 @@ pub fn comment_delete<A: ConfluenceApi>(api: &A, comment_id: &str) -> Result<()>
     }
 
     api.delete_comment(comment_id)
+}
+
+pub fn comment_resolve<A: ConfluenceApi>(api: &A, comment_id: &str) -> Result<CommentSummary> {
+    if comment_id.trim().is_empty() {
+        return Err(ConfluenceCliError::Config(
+            "comment resolve requires a non-empty comment id".to_owned(),
+        ));
+    }
+
+    api.set_inline_comment_resolution(comment_id, true)
+}
+
+pub fn comment_reopen<A: ConfluenceApi>(api: &A, comment_id: &str) -> Result<CommentSummary> {
+    if comment_id.trim().is_empty() {
+        return Err(ConfluenceCliError::Config(
+            "comment reopen requires a non-empty comment id".to_owned(),
+        ));
+    }
+
+    api.set_inline_comment_resolution(comment_id, false)
 }
 
 fn require_property_key(key: &str) -> Result<()> {
@@ -660,6 +699,9 @@ mod tests {
                 created_at: Some("2025-01-01".to_owned()),
                 version: Some(1),
                 resolution: None,
+                inline_properties: None,
+                inline_marker_ref: None,
+                inline_original_selection: None,
             }])
         }
 
@@ -675,6 +717,47 @@ mod tests {
                 created_at: Some("2025-01-01".to_owned()),
                 version: Some(1),
                 resolution: None,
+                inline_properties: request.inline_properties,
+                inline_marker_ref: None,
+                inline_original_selection: None,
+            })
+        }
+
+        fn get_comment(&self, comment_id: &str) -> Result<CommentSummary> {
+            Ok(CommentSummary {
+                id: comment_id.to_owned(),
+                status: Some("current".to_owned()),
+                body_storage: "<p>Hello</p>".to_owned(),
+                location: Some(CommentLocation::Inline),
+                parent_id: None,
+                author: Some("Ada".to_owned()),
+                created_at: Some("2025-01-01".to_owned()),
+                version: Some(2),
+                resolution: Some("open".to_owned()),
+                inline_properties: Some(serde_json::json!({ "markerRef": "m-1" })),
+                inline_marker_ref: Some("m-1".to_owned()),
+                inline_original_selection: Some("selected text".to_owned()),
+            })
+        }
+
+        fn set_inline_comment_resolution(
+            &self,
+            comment_id: &str,
+            resolved: bool,
+        ) -> Result<CommentSummary> {
+            Ok(CommentSummary {
+                id: comment_id.to_owned(),
+                status: Some("current".to_owned()),
+                body_storage: "<p>Hello</p>".to_owned(),
+                location: Some(CommentLocation::Inline),
+                parent_id: None,
+                author: Some("Ada".to_owned()),
+                created_at: Some("2025-01-01".to_owned()),
+                version: Some(3),
+                resolution: Some(if resolved { "resolved" } else { "open" }.to_owned()),
+                inline_properties: None,
+                inline_marker_ref: Some("m-1".to_owned()),
+                inline_original_selection: Some("selected text".to_owned()),
             })
         }
 
@@ -832,6 +915,7 @@ mod tests {
             runtime_config: RuntimeConfig {
                 config: crate::config::ConfigFile::default(),
                 resolved_profile: Some(crate::config::ResolvedProfile {
+                    id: "profile-1".to_owned(),
                     name: Some("work".to_owned()),
                     domain: "example.atlassian.net".to_owned(),
                     protocol: "https".to_owned(),
@@ -842,11 +926,32 @@ mod tests {
                     api_token: Some("token".to_owned()),
                     password: None,
                     read_only: true,
+                    secret_backend: Some(crate::config::SecretBackend::Keyring),
                 }),
             },
         };
 
         let error = ensure_writable(&runtime).expect_err("read-only runtime should fail");
         assert!(matches!(error, ConfluenceCliError::Config(_)));
+    }
+
+    #[test]
+    fn comment_info_returns_richer_inline_metadata() {
+        let api = FakeApi::default();
+        let comment = comment_info(&api, "c-1").expect("comment info should succeed");
+        assert_eq!(comment.inline_marker_ref.as_deref(), Some("m-1"));
+        assert_eq!(
+            comment.inline_original_selection.as_deref(),
+            Some("selected text")
+        );
+    }
+
+    #[test]
+    fn comment_resolve_and_reopen_update_status() {
+        let api = FakeApi::default();
+        let resolved = comment_resolve(&api, "c-1").expect("resolve should succeed");
+        let reopened = comment_reopen(&api, "c-1").expect("reopen should succeed");
+        assert_eq!(resolved.resolution.as_deref(), Some("resolved"));
+        assert_eq!(reopened.resolution.as_deref(), Some("open"));
     }
 }

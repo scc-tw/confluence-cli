@@ -35,7 +35,13 @@ pub trait ConfluenceApi {
         page: &PageRef,
         location: Option<CommentLocation>,
     ) -> Result<Vec<CommentSummary>>;
+    fn get_comment(&self, comment_id: &str) -> Result<CommentSummary>;
     fn create_comment(&self, request: CommentCreateRequest) -> Result<CommentSummary>;
+    fn set_inline_comment_resolution(
+        &self,
+        comment_id: &str,
+        resolved: bool,
+    ) -> Result<CommentSummary>;
     fn delete_comment(&self, comment_id: &str) -> Result<()>;
 }
 
@@ -128,6 +134,9 @@ pub struct CommentSummary {
     pub created_at: Option<String>,
     pub version: Option<u32>,
     pub resolution: Option<String>,
+    pub inline_properties: Option<Value>,
+    pub inline_marker_ref: Option<String>,
+    pub inline_original_selection: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -743,6 +752,43 @@ impl ConfluenceApi for HttpConfluenceApi {
         Ok(response.into_summary())
     }
 
+    fn get_comment(&self, comment_id: &str) -> Result<CommentSummary> {
+        let request = self.authed(
+            self.client
+                .get(self.v1_url(&format!("/content/{comment_id}")))
+                .query(&[("expand", "body.storage,history,version,ancestors")]),
+        )?;
+        let response: CommentV1 = request.send()?.error_for_status()?.json()?;
+        Ok(response.into_summary())
+    }
+
+    fn set_inline_comment_resolution(
+        &self,
+        comment_id: &str,
+        resolved: bool,
+    ) -> Result<CommentSummary> {
+        let request = self.authed(
+            self.client
+                .get(self.v2_url(&format!("/inline-comments/{comment_id}")))
+                .query(&[("body-format", "storage")]),
+        )?;
+        let current: InlineCommentV2 = request.send()?.error_for_status()?.json()?;
+        let version = current.version.number + 1;
+
+        let payload = serde_json::json!({
+            "version": { "number": version },
+            "resolved": resolved
+        });
+        let request = self.authed(
+            self.client
+                .put(self.v2_url(&format!("/inline-comments/{comment_id}")))
+                .header(CONTENT_TYPE, "application/json")
+                .json(&payload),
+        )?;
+        let response: InlineCommentV2 = request.send()?.error_for_status()?.json()?;
+        Ok(response.into_summary())
+    }
+
     fn delete_comment(&self, comment_id: &str) -> Result<()> {
         let request = self.authed(
             self.client
@@ -1040,6 +1086,17 @@ struct CommentV1 {
 
 impl CommentV1 {
     fn into_summary(self) -> CommentSummary {
+        let resolution = self.extensions.as_ref().and_then(|extensions| {
+            extensions
+                .resolution
+                .as_ref()
+                .and_then(|resolution| resolution.status.clone())
+        });
+        let inline_properties = self
+            .extensions
+            .as_ref()
+            .and_then(|extensions| extensions.inline_properties.clone());
+
         CommentSummary {
             id: self.id,
             status: self.status,
@@ -1068,11 +1125,10 @@ impl CommentV1 {
                 .and_then(|user| user.display_name.clone()),
             created_at: self.history.and_then(|history| history.created_date),
             version: self.version.map(|version| version.number),
-            resolution: self.extensions.and_then(|extensions| {
-                extensions
-                    .resolution
-                    .and_then(|resolution| resolution.status)
-            }),
+            resolution,
+            inline_properties,
+            inline_marker_ref: None,
+            inline_original_selection: None,
         }
     }
 }
@@ -1102,6 +1158,8 @@ struct CommentAncestor {
 struct CommentExtensions {
     location: Option<String>,
     resolution: Option<CommentResolution>,
+    #[serde(rename = "inlineProperties")]
+    inline_properties: Option<Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1109,9 +1167,67 @@ struct CommentResolution {
     status: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct InlineCommentV2 {
+    id: String,
+    status: Option<String>,
+    version: PageVersion,
+    #[serde(rename = "resolutionStatus")]
+    resolution_status: Option<String>,
+    body: Option<InlineCommentBody>,
+    properties: Option<InlineCommentProperties>,
+}
+
+impl InlineCommentV2 {
+    fn into_summary(self) -> CommentSummary {
+        CommentSummary {
+            id: self.id,
+            status: self.status,
+            body_storage: self
+                .body
+                .and_then(|body| body.storage)
+                .and_then(|body| body.value)
+                .unwrap_or_default(),
+            location: Some(CommentLocation::Inline),
+            parent_id: None,
+            author: None,
+            created_at: None,
+            version: Some(self.version.number),
+            resolution: self.resolution_status,
+            inline_properties: None,
+            inline_marker_ref: self
+                .properties
+                .as_ref()
+                .and_then(|properties| properties.inline_marker_ref.clone()),
+            inline_original_selection: self
+                .properties
+                .and_then(|properties| properties.inline_original_selection),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct InlineCommentBody {
+    storage: Option<InlineCommentBodyStorage>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct InlineCommentBodyStorage {
+    value: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct InlineCommentProperties {
+    #[serde(rename = "inlineMarkerRef")]
+    inline_marker_ref: Option<String>,
+    #[serde(rename = "inlineOriginalSelection")]
+    inline_original_selection: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::SecretBackend;
 
     #[test]
     fn extracts_page_id_from_query_parameter() {
@@ -1136,6 +1252,7 @@ mod tests {
     #[test]
     fn parses_next_start_from_paged_link() {
         let api = HttpConfluenceApi::new(ResolvedProfile {
+            id: "profile-1".to_owned(),
             name: None,
             domain: "example.atlassian.net".to_owned(),
             protocol: "https".to_owned(),
@@ -1146,6 +1263,7 @@ mod tests {
             api_token: Some("token".to_owned()),
             password: None,
             read_only: false,
+            secret_backend: Some(SecretBackend::Keyring),
         })
         .expect("api should construct");
 

@@ -12,7 +12,9 @@ use crate::config::{
 };
 use crate::convert::{apply_unified_patch, convert_text};
 use crate::domain::{BodyFormat, CommentLocation, DeleteMode, MoveTarget, PageRef};
+use crate::secret::{KeyringSecretStore, SecretKind, SecretStore};
 use crate::support::{ConfluenceCliError, Result};
+use uuid::Uuid;
 
 #[derive(Debug, Parser)]
 #[command(name = "confluence", version, about = "Rust-first Confluence CLI")]
@@ -262,6 +264,9 @@ pub enum CommentCommand {
         #[arg(long, value_enum)]
         location: Option<CommentLocation>,
     },
+    Info {
+        comment: String,
+    },
     Create {
         page: PageRef,
         #[arg(long)]
@@ -296,6 +301,12 @@ pub enum CommentCommand {
         inline_properties_file: Option<PathBuf>,
     },
     Delete {
+        comment: String,
+    },
+    Resolve {
+        comment: String,
+    },
+    Reopen {
         comment: String,
     },
 }
@@ -632,6 +643,12 @@ fn dispatch_comment(global: &GlobalArgs, command: CommentCommand) -> Result<()> 
                 print_comments_human(comments)
             })
         }
+        CommentCommand::Info { comment } => {
+            let comment = app::comment_info(&api, &comment)?;
+            print_json_or_human(global.output, &comment, |comment| {
+                print_comments_human(std::slice::from_ref(comment))
+            })
+        }
         CommentCommand::Create {
             page,
             body,
@@ -720,6 +737,20 @@ fn dispatch_comment(global: &GlobalArgs, command: CommentCommand) -> Result<()> 
             println!("Comment deletion request accepted.");
             Ok(())
         }
+        CommentCommand::Resolve { comment } => {
+            app::ensure_writable(&runtime)?;
+            let comment = app::comment_resolve(&api, &comment)?;
+            print_json_or_human(global.output, &comment, |comment| {
+                println!("Resolved comment {}", comment.id);
+            })
+        }
+        CommentCommand::Reopen { comment } => {
+            app::ensure_writable(&runtime)?;
+            let comment = app::comment_reopen(&api, &comment)?;
+            print_json_or_human(global.output, &comment, |comment| {
+                println!("Reopened comment {}", comment.id);
+            })
+        }
     }
 }
 
@@ -743,7 +774,9 @@ fn config_init(global: &GlobalArgs, name: &str, profile_args: ProfileArgs) -> Re
         ));
     }
 
-    let profile = profile_from_args(profile_args)?;
+    let store = KeyringSecretStore;
+    let (profile, secrets) = profile_from_args(profile_args)?;
+    write_profile_secrets(&store, &profile, &secrets)?;
     let config = init_config(&path, name, profile)?;
     print_profiles_human(&RuntimeConfig {
         config,
@@ -759,7 +792,9 @@ fn profile_add(
     activate: bool,
 ) -> Result<()> {
     let path = config_path(global);
-    let profile = profile_from_args(profile_args)?;
+    let store = KeyringSecretStore;
+    let (profile, secrets) = profile_from_args(profile_args)?;
+    write_profile_secrets(&store, &profile, &secrets)?;
     let config = upsert_profile(&path, name, profile, activate)?;
     print_profiles_human(&RuntimeConfig {
         config,
@@ -780,6 +815,14 @@ fn profile_use(global: &GlobalArgs, name: &str) -> Result<()> {
 
 fn profile_remove(global: &GlobalArgs, name: &str) -> Result<()> {
     let path = config_path(global);
+    if let Some(profile) = load_config(&path)?.profiles.get(name).cloned()
+        && profile.secret_backend.is_some()
+    {
+        let store = KeyringSecretStore;
+        let profile_id = profile.id.as_deref().unwrap_or(name);
+        store.delete(profile_id, SecretKind::ApiToken)?;
+        store.delete(profile_id, SecretKind::Password)?;
+    }
     let config = remove_profile(&path, name)?;
     print_profiles_human(&RuntimeConfig {
         config,
@@ -788,7 +831,13 @@ fn profile_remove(global: &GlobalArgs, name: &str) -> Result<()> {
     Ok(())
 }
 
-fn profile_from_args(args: ProfileArgs) -> Result<Profile> {
+#[derive(Debug, Clone, Default)]
+struct ProfileSecrets {
+    api_token: Option<String>,
+    password: Option<String>,
+}
+
+fn profile_from_args(args: ProfileArgs) -> Result<(Profile, ProfileSecrets)> {
     let domain = args.domain.ok_or_else(|| {
         ConfluenceCliError::Config("profile configuration requires --domain".to_owned())
     })?;
@@ -803,17 +852,52 @@ fn profile_from_args(args: ProfileArgs) -> Result<Profile> {
         }
     });
 
-    Ok(Profile {
-        domain: Some(domain),
-        protocol: args.protocol,
-        api_path: args.api_path,
-        auth_type,
-        email: args.email,
-        username: args.username,
+    let secrets = ProfileSecrets {
         api_token: args.api_token,
         password: args.password,
-        read_only: args.read_only.then_some(true),
-    })
+    };
+
+    Ok((
+        Profile {
+            id: Some(Uuid::new_v4().to_string()),
+            domain: Some(domain),
+            protocol: args.protocol,
+            api_path: args.api_path,
+            auth_type,
+            email: args.email,
+            username: args.username,
+            api_token: None,
+            password: None,
+            read_only: args.read_only.then_some(true),
+            secret_backend: if secrets.api_token.is_some() || secrets.password.is_some() {
+                Some(crate::config::SecretBackend::Keyring)
+            } else {
+                None
+            },
+        },
+        secrets,
+    ))
+}
+
+fn write_profile_secrets(
+    store: &dyn SecretStore,
+    profile: &Profile,
+    secrets: &ProfileSecrets,
+) -> Result<()> {
+    let profile_id = profile
+        .id
+        .as_deref()
+        .ok_or_else(|| ConfluenceCliError::Config("profile id missing".to_owned()))?;
+
+    if let Some(api_token) = secrets.api_token.as_deref() {
+        store.set(profile_id, SecretKind::ApiToken, api_token)?;
+    }
+
+    if let Some(password) = secrets.password.as_deref() {
+        store.set(profile_id, SecretKind::Password, password)?;
+    }
+
+    Ok(())
 }
 
 fn config_path(global: &GlobalArgs) -> PathBuf {
@@ -1021,6 +1105,15 @@ fn print_comments_human(comments: &[CommentSummary]) {
         if let Some(location) = comment.location {
             println!("  location: {location:?}");
         }
+        if let Some(resolution) = &comment.resolution {
+            println!("  resolution: {resolution}");
+        }
+        if let Some(marker_ref) = &comment.inline_marker_ref {
+            println!("  marker ref: {marker_ref}");
+        }
+        if let Some(selection) = &comment.inline_original_selection {
+            println!("  original selection: {selection}");
+        }
     }
 }
 
@@ -1213,5 +1306,32 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parses_comment_info_command() {
+        let cli = Cli::parse_from(["confluence", "comment", "info", "c-1"]);
+
+        match cli.command {
+            Command::Comment(CommentCommand::Info { comment }) => {
+                assert_eq!(comment, "c-1");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_comment_resolution_commands() {
+        let resolve = Cli::parse_from(["confluence", "comment", "resolve", "c-1"]);
+        let reopen = Cli::parse_from(["confluence", "comment", "reopen", "c-1"]);
+
+        assert!(matches!(
+            resolve.command,
+            Command::Comment(CommentCommand::Resolve { comment }) if comment == "c-1"
+        ));
+        assert!(matches!(
+            reopen.command,
+            Command::Comment(CommentCommand::Reopen { comment }) if comment == "c-1"
+        ));
     }
 }
