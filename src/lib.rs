@@ -5,6 +5,7 @@ pub mod config;
 pub mod convert;
 pub mod domain;
 pub mod render;
+pub mod secret;
 pub mod support;
 
 pub fn run() -> support::Result<()> {

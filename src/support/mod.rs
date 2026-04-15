@@ -13,6 +13,9 @@ pub enum ConfluenceCliError {
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
 
+    #[error("Secret store error: {0}")]
+    SecretStore(String),
+
     #[error("XML error: {0}")]
     Xml(#[from] quick_xml::Error),
 
