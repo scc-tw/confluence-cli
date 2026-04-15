@@ -14,6 +14,7 @@ use tempfile::tempdir;
 
 fn test_profile(server: &MockServer) -> ResolvedProfile {
     ResolvedProfile {
+        id: "profile-1".to_owned(),
         name: Some("test".to_owned()),
         domain: server.address().to_string(),
         protocol: "http".to_owned(),
@@ -24,6 +25,7 @@ fn test_profile(server: &MockServer) -> ResolvedProfile {
         api_token: Some("token-123".to_owned()),
         password: None,
         read_only: false,
+        secret_backend: Some(confluence_cli::config::SecretBackend::Keyring),
     }
 }
 
@@ -699,6 +701,248 @@ fn comment_delete_hits_delete_route() {
     api.delete_comment("c-1")
         .expect("comment delete should succeed");
     delete.assert();
+}
+
+#[test]
+fn comment_info_reads_full_comment_document() {
+    let server = MockServer::start();
+    let get = server.mock(|when, then| {
+        when.method(GET)
+            .path("/wiki/rest/api/content/c-1")
+            .query_param("expand", "body.storage,history,version,ancestors")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "id": "c-1",
+            "status": "current",
+            "body": { "storage": { "value": "<p>Inline comment</p>" } },
+            "history": { "createdBy": { "displayName": "Ada" }, "createdDate": "2025-01-01" },
+            "version": { "number": 2 },
+            "extensions": {
+                "location": "inline",
+                "resolution": { "status": "open" },
+                "inlineProperties": { "markerRef": "m-1", "selection": "selected text" }
+            }
+        }));
+    });
+
+    let api = HttpConfluenceApi::new(test_profile(&server)).expect("api should initialize");
+    let comment = api.get_comment("c-1").expect("comment info should succeed");
+
+    get.assert();
+    assert_eq!(comment.location, Some(CommentLocation::Inline));
+    assert_eq!(comment.resolution.as_deref(), Some("open"));
+    assert_eq!(
+        comment.inline_properties,
+        Some(json!({ "markerRef": "m-1", "selection": "selected text" }))
+    );
+}
+
+#[test]
+fn comment_resolve_and_reopen_use_inline_comment_v2_transport() {
+    let server = MockServer::start();
+
+    let get_resolve = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/inline-comments/c-1")
+            .query_param("body-format", "storage")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "id": "c-1",
+            "status": "current",
+            "version": { "number": 2 },
+            "resolutionStatus": "open",
+            "body": { "storage": { "value": "<p>Comment</p>" } },
+            "properties": { "inlineMarkerRef": "m-1", "inlineOriginalSelection": "selected text" }
+        }));
+    });
+
+    let put_resolve = server.mock(|when, then| {
+        when.method(PUT)
+            .path("/api/v2/inline-comments/c-1")
+            .header("authorization", "Bearer token-123")
+            .body_contains("\"number\":3")
+            .body_contains("\"resolved\":true");
+        then.status(200).json_body(json!({
+            "id": "c-1",
+            "status": "current",
+            "version": { "number": 3 },
+            "resolutionStatus": "resolved",
+            "body": { "storage": { "value": "<p>Comment</p>" } },
+            "properties": { "inlineMarkerRef": "m-1", "inlineOriginalSelection": "selected text" }
+        }));
+    });
+
+    let get_reopen = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/inline-comments/c-2")
+            .query_param("body-format", "storage")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "id": "c-2",
+            "status": "current",
+            "version": { "number": 5 },
+            "resolutionStatus": "resolved",
+            "body": { "storage": { "value": "<p>Comment</p>" } },
+            "properties": { "inlineMarkerRef": "m-2", "inlineOriginalSelection": "selected text" }
+        }));
+    });
+
+    let put_reopen = server.mock(|when, then| {
+        when.method(PUT)
+            .path("/api/v2/inline-comments/c-2")
+            .header("authorization", "Bearer token-123")
+            .body_contains("\"number\":6")
+            .body_contains("\"resolved\":false");
+        then.status(200).json_body(json!({
+            "id": "c-2",
+            "status": "current",
+            "version": { "number": 6 },
+            "resolutionStatus": "open",
+            "body": { "storage": { "value": "<p>Comment</p>" } },
+            "properties": { "inlineMarkerRef": "m-2", "inlineOriginalSelection": "selected text" }
+        }));
+    });
+
+    let api = HttpConfluenceApi::new(test_profile(&server)).expect("api should initialize");
+    let resolved = api
+        .set_inline_comment_resolution("c-1", true)
+        .expect("resolve should succeed");
+    let reopened = api
+        .set_inline_comment_resolution("c-2", false)
+        .expect("reopen should succeed");
+
+    get_resolve.assert();
+    put_resolve.assert();
+    get_reopen.assert();
+    put_reopen.assert();
+    assert_eq!(resolved.resolution.as_deref(), Some("resolved"));
+    assert_eq!(resolved.inline_marker_ref.as_deref(), Some("m-1"));
+    assert_eq!(reopened.resolution.as_deref(), Some("open"));
+    assert_eq!(
+        reopened.inline_original_selection.as_deref(),
+        Some("selected text")
+    );
+}
+
+#[test]
+fn comment_info_reads_richer_inline_metadata() {
+    let server = MockServer::start();
+    let get = server.mock(|when, then| {
+        when.method(GET)
+            .path("/wiki/rest/api/content/c-1")
+            .query_param("expand", "body.storage,history,version,ancestors")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "id": "c-1",
+            "status": "current",
+            "body": { "storage": { "value": "<p>Inline comment</p>" } },
+            "history": { "createdBy": { "displayName": "Ada" }, "createdDate": "2025-01-01" },
+            "version": { "number": 2 },
+            "extensions": {
+                "location": "inline",
+                "resolution": { "status": "open" },
+                "inlineProperties": { "markerRef": "m-1", "selection": "selected text" }
+            }
+        }));
+    });
+
+    let api = HttpConfluenceApi::new(test_profile(&server)).expect("api should initialize");
+    let comment = api.get_comment("c-1").expect("comment info should succeed");
+
+    get.assert();
+    assert_eq!(comment.location, Some(CommentLocation::Inline));
+    assert_eq!(comment.resolution.as_deref(), Some("open"));
+    assert_eq!(
+        comment.inline_properties,
+        Some(json!({ "markerRef": "m-1", "selection": "selected text" }))
+    );
+}
+
+#[test]
+fn comment_resolve_and_reopen_use_inline_comment_endpoint() {
+    let server = MockServer::start();
+
+    let get_resolve = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/inline-comments/c-1")
+            .query_param("body-format", "storage")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "id": "c-1",
+            "status": "current",
+            "version": { "number": 2 },
+            "resolutionStatus": "open",
+            "body": { "storage": { "value": "<p>Comment</p>" } },
+            "properties": { "inlineMarkerRef": "m-1", "inlineOriginalSelection": "selected text" }
+        }));
+    });
+
+    let put_resolve = server.mock(|when, then| {
+        when.method(PUT)
+            .path("/api/v2/inline-comments/c-1")
+            .header("authorization", "Bearer token-123")
+            .body_contains("\"number\":3")
+            .body_contains("\"resolved\":true");
+        then.status(200).json_body(json!({
+            "id": "c-1",
+            "status": "current",
+            "version": { "number": 3 },
+            "resolutionStatus": "resolved",
+            "body": { "storage": { "value": "<p>Comment</p>" } },
+            "properties": { "inlineMarkerRef": "m-1", "inlineOriginalSelection": "selected text" }
+        }));
+    });
+
+    let get_reopen = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/inline-comments/c-2")
+            .query_param("body-format", "storage")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "id": "c-2",
+            "status": "current",
+            "version": { "number": 5 },
+            "resolutionStatus": "resolved",
+            "body": { "storage": { "value": "<p>Comment</p>" } },
+            "properties": { "inlineMarkerRef": "m-2", "inlineOriginalSelection": "selected text" }
+        }));
+    });
+
+    let put_reopen = server.mock(|when, then| {
+        when.method(PUT)
+            .path("/api/v2/inline-comments/c-2")
+            .header("authorization", "Bearer token-123")
+            .body_contains("\"number\":6")
+            .body_contains("\"resolved\":false");
+        then.status(200).json_body(json!({
+            "id": "c-2",
+            "status": "current",
+            "version": { "number": 6 },
+            "resolutionStatus": "open",
+            "body": { "storage": { "value": "<p>Comment</p>" } },
+            "properties": { "inlineMarkerRef": "m-2", "inlineOriginalSelection": "selected text" }
+        }));
+    });
+
+    let api = HttpConfluenceApi::new(test_profile(&server)).expect("api should initialize");
+    let resolved = api
+        .set_inline_comment_resolution("c-1", true)
+        .expect("resolve should succeed");
+    let reopened = api
+        .set_inline_comment_resolution("c-2", false)
+        .expect("reopen should succeed");
+
+    get_resolve.assert();
+    put_resolve.assert();
+    get_reopen.assert();
+    put_reopen.assert();
+    assert_eq!(resolved.resolution.as_deref(), Some("resolved"));
+    assert_eq!(resolved.inline_marker_ref.as_deref(), Some("m-1"));
+    assert_eq!(reopened.resolution.as_deref(), Some("open"));
+    assert_eq!(
+        reopened.inline_original_selection.as_deref(),
+        Some("selected text")
+    );
 }
 
 #[test]

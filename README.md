@@ -27,7 +27,7 @@ confluence profile list|use|add|remove
 confluence page read|info|find|search|children|create|create-child|update|patch|move|archive|delete|export
 confluence attachment list|download|upload|delete
 confluence property list|get|set|delete
-confluence comment list|create|reply|delete
+confluence comment list|info|create|reply|resolve|reopen|delete
 confluence convert
 ```
 
@@ -42,7 +42,7 @@ The project is no longer a skeleton. It currently includes:
 - page read/info/search/create/create-child/update/patch/move/archive/delete/export workflows
 - attachment list/download/upload/delete workflows
 - property list/get/set/delete workflows
-- comment list/create/reply/delete workflows
+- comment list/info/create/reply/resolve/reopen workflows
 - local Markdown/storage/text conversion
 - managed export bundle metadata
 - local unified-diff patch application
@@ -55,8 +55,9 @@ The rewrite is usable, but some areas are intentionally conservative:
 - `page move --before/--after` is guarded and refuses top-level targets
 - `page move --before/--after --title` is not implemented yet
 - inline comments require explicit inline properties; the CLI does not try to infer editor selection metadata
+- inline create/reply remain guarded even though inline info/resolve/reopen are richer now
 - raw CQL search is supported, but advanced transport coverage is still improving
-- secrets are currently stored in the local config file; secure credential storage is still future work
+- new profile writes prefer OS keyring-backed secrets, while legacy plaintext secrets are migrated when possible
 
 ## Configuration
 
@@ -101,6 +102,12 @@ Resolution order is:
 - `bearer` auth requires `api_token`
 - `mtls` is not implemented yet
 
+### Secret handling
+
+- environment variables still take precedence for CI and automation
+- new profile writes store metadata in `config.json` and secrets in the OS keyring
+- legacy plaintext `api_token` / `password` values are still read for compatibility and migrated when possible
+
 ## Export behavior
 
 `page export` currently writes a managed bundle:
@@ -127,6 +134,9 @@ confluence page create --title "Design Doc" --body-file .\page.md --space-key EN
 confluence page export 123 --dest .\exports\design --format markdown
 confluence attachment upload 123 --file .\spec.md --comment "refresh"
 confluence property set 123 "release notes" --value-file .\release-notes.json
+confluence comment info c-1
+confluence comment resolve c-1
+confluence comment reopen c-1
 ```
 
 ## Testing and verification
@@ -146,13 +156,15 @@ Coverage includes:
 - app-layer workflow validation tests
 - conversion and patch tests
 - API helper tests
-- HTTP contract tests for pagination, comment reply payloads, and move guard behavior
+- HTTP contract tests for pagination, richer comment flows, attachment/property/export transport, and move guard behavior
 
 Current HTTP contract coverage includes:
 
 - raw CQL pagination
 - page move guards and parent move transport
 - comment reply payloads and delete/list routes
+- comment info transport
+- inline comment resolve/reopen transport
 - attachment list/download/upload/delete routes
 - property list/get/set/delete routes
 - export transport flow
@@ -162,7 +174,7 @@ Current testing limits:
 
 - attachment/property/export coverage is transport-focused, not full live-cloud integration
 - CLI integration coverage is smoke-level, not exhaustive output snapshot coverage
-- inline comment metadata is still treated as explicit caller input rather than inferred editor state
+- inline comment metadata is still treated as explicit caller input rather than inferred editor state for create/reply
 
 ## Next high-value work
 
@@ -170,4 +182,4 @@ Current testing limits:
 - paginate raw CQL searches across larger result sets
 - deepen move and comment contract coverage
 - improve README / examples / migration guidance
-- add stronger secret handling for persisted profiles
+- tenant-validate broader inline metadata handling before unguarding inline create/reply
