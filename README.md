@@ -58,6 +58,77 @@ The rewrite is usable, but some areas are intentionally conservative:
 - raw CQL search is supported, but advanced transport coverage is still improving
 - secrets are currently stored in the local config file; secure credential storage is still future work
 
+## Configuration
+
+Default config path on Windows:
+
+```text
+%USERPROFILE%\.config\confluence-cli\config.json
+```
+
+If `USERPROFILE` is unavailable, the CLI falls back to `./config.json`.
+
+### Environment variables
+
+Supported runtime overrides:
+
+- `CONFLUENCE_PROFILE`
+- `CONFLUENCE_DOMAIN`
+- `CONFLUENCE_PROTOCOL`
+- `CONFLUENCE_API_PATH`
+- `CONFLUENCE_AUTH_TYPE`
+- `CONFLUENCE_EMAIL`
+- `CONFLUENCE_USERNAME`
+- `CONFLUENCE_API_TOKEN`
+- `CONFLUENCE_PASSWORD`
+- `CONFLUENCE_READ_ONLY`
+
+### Precedence
+
+Resolution order is:
+
+1. explicit CLI flags such as `--config-path` and `--profile`
+2. environment variables
+3. selected profile from `config.json`
+4. active profile from `config.json`
+5. built-in defaults
+
+### Auth expectations
+
+- `basic` auth requires identity plus secret:
+  - `email` or `username`
+  - `api_token` or `password`
+- `bearer` auth requires `api_token`
+- `mtls` is not implemented yet
+
+## Export behavior
+
+`page export` currently writes a managed bundle:
+
+- content file in the requested format, such as `page.md`
+- `.confluence/page.json` metadata
+- optional `attachments/` directory when attachments are included
+
+Supported export formats today:
+
+- `markdown`
+- `storage`
+- `html`
+- `text`
+
+Use `--skip-attachments` to avoid attachment download requests.
+
+## Examples
+
+```text
+confluence config init --name work --domain your-domain.atlassian.net --auth-type bearer --api-token <token>
+confluence profile add staging --domain staging.atlassian.net --auth-type bearer --api-token <token>
+confluence page create --title "Design Doc" --body-file .\page.md --space-key ENG
+confluence page export 123 --dest .\exports\design --format markdown
+confluence attachment upload 123 --file .\spec.md --comment "refresh"
+confluence property set 123 "release notes" --value-file .\release-notes.json
+```
+
 ## Testing and verification
 
 The project currently verifies with:
@@ -76,6 +147,22 @@ Coverage includes:
 - conversion and patch tests
 - API helper tests
 - HTTP contract tests for pagination, comment reply payloads, and move guard behavior
+
+Current HTTP contract coverage includes:
+
+- raw CQL pagination
+- page move guards and parent move transport
+- comment reply payloads and delete/list routes
+- attachment list/download/upload/delete routes
+- property list/get/set/delete routes
+- export transport flow
+- CLI smoke coverage for `--config-path`, `--profile`, and read-only mutation blocking
+
+Current testing limits:
+
+- attachment/property/export coverage is transport-focused, not full live-cloud integration
+- CLI integration coverage is smoke-level, not exhaustive output snapshot coverage
+- inline comment metadata is still treated as explicit caller input rather than inferred editor state
 
 ## Next high-value work
 
