@@ -11,9 +11,12 @@ use crate::support::{ConfluenceCliError, Result};
 
 pub trait ConfluenceApi {
     fn list_spaces(&self) -> Result<Vec<SpaceSummary>>;
+    fn create_page(&self, request: CreatePageRequest) -> Result<PageSummary>;
+    fn list_child_pages(&self, page: &PageRef) -> Result<Vec<PageSummary>>;
     fn get_page_info(&self, page: &PageRef) -> Result<PageSummary>;
     fn read_page(&self, page: &PageRef, format: BodyFormat) -> Result<PageBody>;
     fn search_pages(&self, query: &str) -> Result<Vec<PageSummary>>;
+    fn search_pages_cql(&self, query: &str) -> Result<Vec<PageSummary>>;
     fn archive_page(&self, page: &PageRef) -> Result<ArchiveResult>;
     fn delete_page(&self, page: &PageRef, mode: DeleteMode) -> Result<()>;
     fn update_page(&self, request: UpdatePageRequest) -> Result<PageSummary>;
@@ -63,6 +66,14 @@ pub struct PageBody {
 pub struct ArchiveResult {
     pub task_id: String,
     pub state: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreatePageRequest {
+    pub title: String,
+    pub storage_body: String,
+    pub space_id: String,
+    pub parent_id: Option<PageId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -263,6 +274,49 @@ impl ConfluenceApi for HttpConfluenceApi {
             .collect())
     }
 
+    fn create_page(&self, request: CreatePageRequest) -> Result<PageSummary> {
+        let mut payload = serde_json::json!({
+            "spaceId": request.space_id,
+            "title": request.title,
+            "status": "current",
+            "body": {
+                "representation": "storage",
+                "value": request.storage_body,
+            }
+        });
+
+        if let Some(parent_id) = request.parent_id {
+            payload["parentId"] = serde_json::json!(parent_id.get().to_string());
+        }
+
+        let request = self.authed(
+            self.client
+                .post(self.v2_url("/pages"))
+                .header(CONTENT_TYPE, "application/json")
+                .json(&payload),
+        )?;
+        let response: PageV2 = request.send()?.error_for_status()?.json()?;
+        Ok(response.into_summary())
+    }
+
+    fn list_child_pages(&self, page: &PageRef) -> Result<Vec<PageSummary>> {
+        let page_id = self.resolve_page_id(page)?;
+        let mut next_url = Some(self.v2_url(&format!("/pages/{page_id}/children?limit=100")));
+        let mut children = Vec::new();
+
+        while let Some(url) = next_url.take() {
+            let request = self.authed(self.client.get(url))?;
+            let response: PageChildrenResponse = request.send()?.error_for_status()?.json()?;
+            children.extend(response.results.into_iter().map(PageV2::into_summary));
+            next_url = response
+                .links
+                .and_then(|links| links.next)
+                .map(|next| self.absolute_url(&next));
+        }
+
+        Ok(children)
+    }
+
     fn get_page_info(&self, page: &PageRef) -> Result<PageSummary> {
         let page_id = self.resolve_page_id(page)?;
         let request = self.authed(self.client.get(self.v2_url(&format!("/pages/{page_id}"))))?;
@@ -293,10 +347,14 @@ impl ConfluenceApi for HttpConfluenceApi {
 
     fn search_pages(&self, query: &str) -> Result<Vec<PageSummary>> {
         let cql = format!("type=page and text~\"{}\"", query.replace('"', "\\\""));
+        self.search_pages_cql(&cql)
+    }
+
+    fn search_pages_cql(&self, query: &str) -> Result<Vec<PageSummary>> {
         let request = self.authed(
             self.client
                 .get(self.v1_url("/content/search"))
-                .query(&[("cql", cql), ("limit", "25".to_owned())]),
+                .query(&[("cql", query.to_owned()), ("limit", "25".to_owned())]),
         )?;
         let response: SearchResponse = request.send()?.error_for_status()?.json()?;
         Ok(response
@@ -370,65 +428,78 @@ impl ConfluenceApi for HttpConfluenceApi {
 
     fn move_page(&self, request: MovePageRequest) -> Result<PageSummary> {
         let page_id = self.resolve_page_id(&request.page)?;
-        let target_parent = match request.target {
-            MoveTarget::Parent(ref parent) => self.resolve_page_id(parent)?,
-            MoveTarget::Before(_) | MoveTarget::After(_) => {
-                return Err(ConfluenceCliError::NotImplemented(
-                    "page move before/after positioning is not implemented yet".to_owned(),
-                ));
-            }
-        };
-
         let current = self.get_page_v1(page_id, "version,space,body.storage")?;
-        let parent = self.get_page_v1(target_parent, "space")?;
 
-        let current_space = current.space.as_ref();
-        let parent_space = parent.space.as_ref();
-        if let (Some(current_space), Some(parent_space)) = (current_space, parent_space) {
-            let same_id = current_space.id == parent_space.id;
-            let same_key = current_space.key.is_some()
-                && parent_space.key.is_some()
-                && current_space.key == parent_space.key;
-            if !same_id && !same_key {
-                return Err(ConfluenceCliError::Config(
-                    "page move across spaces is not supported".to_owned(),
-                ));
+        match request.target {
+            MoveTarget::Parent(ref parent) => {
+                let target_parent = self.resolve_page_id(parent)?;
+                let parent = self.get_page_v1(target_parent, "space")?;
+                validate_same_space(&current, &parent)?;
+
+                let version = current
+                    .version
+                    .as_ref()
+                    .map(|version| version.number + 1)
+                    .ok_or_else(|| {
+                        ConfluenceCliError::Config(
+                            "page move requires a current version".to_owned(),
+                        )
+                    })?;
+
+                let payload = serde_json::json!({
+                    "id": page_id.get().to_string(),
+                    "type": "page",
+                    "title": request.title.unwrap_or(current.title.clone()),
+                    "status": current.status.clone().unwrap_or_else(|| "current".to_owned()),
+                    "ancestors": [{ "id": target_parent.get().to_string() }],
+                    "body": {
+                        "storage": {
+                            "value": current.body_value("storage").unwrap_or_default(),
+                            "representation": "storage"
+                        }
+                    },
+                    "version": {
+                        "number": version
+                    }
+                });
+
+                let request = self.authed(
+                    self.client
+                        .put(self.v1_url(&format!("/content/{page_id}")))
+                        .header(CONTENT_TYPE, "application/json")
+                        .json(&payload),
+                )?;
+                let response: PageV1 = request.send()?.error_for_status()?.json()?;
+                Ok(response.into_summary())
+            }
+            MoveTarget::Before(ref target) | MoveTarget::After(ref target) => {
+                if request.title.is_some() {
+                    return Err(ConfluenceCliError::NotImplemented(
+                        "renaming during before/after move is not implemented yet".to_owned(),
+                    ));
+                }
+
+                let target_id = self.resolve_page_id(target)?;
+                let target_page = self.get_page_v1(target_id, "space,ancestors")?;
+                validate_same_space(&current, &target_page)?;
+                if target_page.ancestors.is_empty() {
+                    return Err(ConfluenceCliError::Config(
+                        "before/after move against a top-level target is blocked".to_owned(),
+                    ));
+                }
+
+                let position = match request.target {
+                    MoveTarget::Before(_) => "before",
+                    MoveTarget::After(_) => "after",
+                    MoveTarget::Parent(_) => unreachable!("handled above"),
+                };
+                let request = self.authed(self.client.put(
+                    self.v1_url(&format!("/content/{page_id}/move/{position}/{target_id}")),
+                ))?;
+                let response: PageV1 = request.send()?.error_for_status()?.json()?;
+                Ok(response.into_summary())
             }
         }
-
-        let version = current
-            .version
-            .as_ref()
-            .map(|version| version.number + 1)
-            .ok_or_else(|| {
-                ConfluenceCliError::Config("page move requires a current version".to_owned())
-            })?;
-
-        let payload = serde_json::json!({
-            "id": page_id.get().to_string(),
-            "type": "page",
-            "title": request.title.unwrap_or(current.title.clone()),
-            "status": current.status.clone().unwrap_or_else(|| "current".to_owned()),
-            "ancestors": [{ "id": target_parent.get().to_string() }],
-            "body": {
-                "storage": {
-                    "value": current.body_value("storage").unwrap_or_default(),
-                    "representation": "storage"
-                }
-            },
-            "version": {
-                "number": version
-            }
-        });
-
-        let request = self.authed(
-            self.client
-                .put(self.v1_url(&format!("/content/{page_id}")))
-                .header(CONTENT_TYPE, "application/json")
-                .json(&payload),
-        )?;
-        let response: PageV1 = request.send()?.error_for_status()?.json()?;
-        Ok(response.into_summary())
     }
 
     fn list_attachments(&self, page: &PageRef) -> Result<Vec<AttachmentSummary>> {
@@ -695,6 +766,24 @@ fn parse_comment_location(value: Option<&str>) -> Option<CommentLocation> {
     }
 }
 
+fn validate_same_space(source: &PageV1, target: &PageV1) -> Result<()> {
+    let source_space = source.space.as_ref();
+    let target_space = target.space.as_ref();
+    if let (Some(source_space), Some(target_space)) = (source_space, target_space) {
+        let same_id = source_space.id == target_space.id;
+        let same_key = source_space.key.is_some()
+            && target_space.key.is_some()
+            && source_space.key == target_space.key;
+        if !same_id && !same_key {
+            return Err(ConfluenceCliError::Config(
+                "page move across spaces is not supported".to_owned(),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 fn extract_page_id_from_url(url: &str) -> Option<PageId> {
     if let Some(index) = url.find("pageId=") {
         let value = &url[index + 7..];
@@ -737,6 +826,18 @@ struct PageV2 {
     version: Option<PageVersion>,
 }
 
+#[derive(Debug, Deserialize)]
+struct PageChildrenResponse {
+    results: Vec<PageV2>,
+    #[serde(rename = "_links")]
+    links: Option<V2Links>,
+}
+
+#[derive(Debug, Deserialize)]
+struct V2Links {
+    next: Option<String>,
+}
+
 impl PageV2 {
     fn into_summary(self) -> PageSummary {
         PageSummary {
@@ -762,6 +863,8 @@ struct PageV1 {
     version: Option<PageVersion>,
     space: Option<PageSpace>,
     body: Option<PageBodyContainer>,
+    #[serde(default)]
+    ancestors: Vec<PageAncestor>,
 }
 
 impl PageV1 {
@@ -786,6 +889,12 @@ impl PageV1 {
 struct PageSpace {
     id: String,
     key: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PageAncestor {
+    #[allow(dead_code)]
+    id: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

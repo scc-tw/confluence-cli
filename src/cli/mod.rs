@@ -6,7 +6,10 @@ use std::path::PathBuf;
 
 use crate::api::{AttachmentSummary, CommentSummary, ContentProperty, HttpConfluenceApi};
 use crate::app::{self, RuntimeContext};
-use crate::config::{ResolveOptions, RuntimeConfig};
+use crate::config::{
+    AuthKind, Profile, ResolveOptions, RuntimeConfig, default_config_path, init_config,
+    load_config, remove_profile, set_active_profile, upsert_profile,
+};
 use crate::convert::{apply_unified_patch, convert_text};
 use crate::domain::{BodyFormat, CommentLocation, DeleteMode, MoveTarget, PageRef};
 use crate::support::{ConfluenceCliError, Result};
@@ -58,15 +61,52 @@ pub enum Command {
 
 #[derive(Debug, Subcommand)]
 pub enum ConfigCommand {
-    Init,
+    Init {
+        #[arg(long, default_value = "default")]
+        name: String,
+        #[command(flatten)]
+        profile: ProfileArgs,
+    },
 }
 
 #[derive(Debug, Subcommand)]
 pub enum ProfileCommand {
     List,
-    Use { name: String },
-    Add { name: String },
-    Remove { name: String },
+    Use {
+        name: String,
+    },
+    Add {
+        name: String,
+        #[command(flatten)]
+        profile: ProfileArgs,
+        #[arg(long)]
+        activate: bool,
+    },
+    Remove {
+        name: String,
+    },
+}
+
+#[derive(Debug, Clone, Args, Default)]
+pub struct ProfileArgs {
+    #[arg(long)]
+    pub domain: Option<String>,
+    #[arg(long)]
+    pub protocol: Option<String>,
+    #[arg(long)]
+    pub api_path: Option<String>,
+    #[arg(long, value_enum)]
+    pub auth_type: Option<AuthKind>,
+    #[arg(long)]
+    pub email: Option<String>,
+    #[arg(long)]
+    pub username: Option<String>,
+    #[arg(long)]
+    pub api_token: Option<String>,
+    #[arg(long)]
+    pub password: Option<String>,
+    #[arg(long)]
+    pub read_only: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -84,11 +124,37 @@ pub enum PageCommand {
     },
     Search {
         query: String,
+        #[arg(long)]
+        cql: bool,
     },
     Children {
         page: PageRef,
     },
-    Create,
+    Create {
+        #[arg(long)]
+        title: String,
+        #[arg(long)]
+        body: Option<String>,
+        #[arg(long)]
+        body_file: Option<PathBuf>,
+        #[arg(long, value_enum, default_value_t = BodyFormat::Markdown)]
+        body_format: BodyFormat,
+        #[arg(long)]
+        space_id: Option<String>,
+        #[arg(long)]
+        space_key: Option<String>,
+    },
+    CreateChild {
+        parent: PageRef,
+        #[arg(long)]
+        title: String,
+        #[arg(long)]
+        body: Option<String>,
+        #[arg(long)]
+        body_file: Option<PathBuf>,
+        #[arg(long, value_enum, default_value_t = BodyFormat::Markdown)]
+        body_format: BodyFormat,
+    },
     Update {
         page: PageRef,
         #[arg(long)]
@@ -213,6 +279,22 @@ pub enum CommentCommand {
         #[arg(long)]
         inline_properties_file: Option<PathBuf>,
     },
+    Reply {
+        page: PageRef,
+        parent_id: String,
+        #[arg(long)]
+        body: Option<String>,
+        #[arg(long)]
+        body_file: Option<PathBuf>,
+        #[arg(long, value_enum, default_value_t = BodyFormat::Markdown)]
+        body_format: BodyFormat,
+        #[arg(long, value_enum, default_value_t = CommentLocation::Footer)]
+        location: CommentLocation,
+        #[arg(long)]
+        inline_properties: Option<String>,
+        #[arg(long)]
+        inline_properties_file: Option<PathBuf>,
+    },
     Delete {
         comment: String,
     },
@@ -250,18 +332,16 @@ pub fn command() -> clap::Command {
 fn dispatch(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Profile(ProfileCommand::List) => profile_list(&cli.global),
-        Command::Config(ConfigCommand::Init) => {
-            Err(ConfluenceCliError::NotImplemented("config init".to_owned()))
+        Command::Config(ConfigCommand::Init { name, profile }) => {
+            config_init(&cli.global, &name, profile)
         }
-        Command::Profile(ProfileCommand::Use { .. }) => {
-            Err(ConfluenceCliError::NotImplemented("profile use".to_owned()))
-        }
-        Command::Profile(ProfileCommand::Add { .. }) => {
-            Err(ConfluenceCliError::NotImplemented("profile add".to_owned()))
-        }
-        Command::Profile(ProfileCommand::Remove { .. }) => Err(ConfluenceCliError::NotImplemented(
-            "profile remove".to_owned(),
-        )),
+        Command::Profile(ProfileCommand::Use { name }) => profile_use(&cli.global, &name),
+        Command::Profile(ProfileCommand::Add {
+            name,
+            profile,
+            activate,
+        }) => profile_add(&cli.global, &name, profile, activate),
+        Command::Profile(ProfileCommand::Remove { name }) => profile_remove(&cli.global, &name),
         Command::Page(command) => dispatch_page(&cli.global, command),
         Command::Attachment(command) => dispatch_attachment(&cli.global, command),
         Command::Property(command) => dispatch_property(&cli.global, command),
@@ -271,7 +351,7 @@ fn dispatch(cli: Cli) -> Result<()> {
 }
 
 fn dispatch_page(global: &GlobalArgs, command: PageCommand) -> Result<()> {
-    let api = load_api(global)?;
+    let (runtime, api) = load_runtime_and_api(global)?;
 
     match command {
         PageCommand::Read { page, format } => {
@@ -299,7 +379,7 @@ fn dispatch_page(global: &GlobalArgs, command: PageCommand) -> Result<()> {
                 }
             })
         }
-        PageCommand::Find { title } | PageCommand::Search { query: title } => {
+        PageCommand::Find { title } => {
             let summaries = app::page_search(&api, &title)?;
             print_json_or_human(global.output, &summaries, |summaries| {
                 if summaries.is_empty() {
@@ -311,12 +391,80 @@ fn dispatch_page(global: &GlobalArgs, command: PageCommand) -> Result<()> {
                 }
             })
         }
+        PageCommand::Search { query, cql } => {
+            let summaries = if cql {
+                app::page_search_cql(&api, &query)?
+            } else {
+                app::page_search(&api, &query)?
+            };
+            print_json_or_human(global.output, &summaries, |summaries| {
+                if summaries.is_empty() {
+                    println!("No pages found.");
+                } else {
+                    for summary in summaries {
+                        println!("- {} [{}]", summary.title, summary.id);
+                    }
+                }
+            })
+        }
+        PageCommand::Children { page } => {
+            let summaries = app::page_children(&api, &page)?;
+            print_json_or_human(global.output, &summaries, |summaries| {
+                if summaries.is_empty() {
+                    println!("No child pages found.");
+                } else {
+                    for summary in summaries {
+                        println!("- {} [{}]", summary.title, summary.id);
+                    }
+                }
+            })
+        }
+        PageCommand::Create {
+            title,
+            body,
+            body_file,
+            body_format,
+            space_id,
+            space_key,
+        } => {
+            app::ensure_writable(&runtime)?;
+            let raw = read_command_input(
+                body,
+                body_file,
+                "page create requires --body or --body-file",
+            )?;
+            let storage_body = convert_body_to_storage(raw, body_format)?;
+            let summary = app::page_create(&api, title, storage_body, space_id, space_key, None)?;
+            print_json_or_human(global.output, &summary, |summary| {
+                println!("Created {} [{}]", summary.title, summary.id);
+            })
+        }
+        PageCommand::CreateChild {
+            parent,
+            title,
+            body,
+            body_file,
+            body_format,
+        } => {
+            app::ensure_writable(&runtime)?;
+            let raw = read_command_input(
+                body,
+                body_file,
+                "page create-child requires --body or --body-file",
+            )?;
+            let storage_body = convert_body_to_storage(raw, body_format)?;
+            let summary = app::page_create(&api, title, storage_body, None, None, Some(parent))?;
+            print_json_or_human(global.output, &summary, |summary| {
+                println!("Created child page {} [{}]", summary.title, summary.id);
+            })
+        }
         PageCommand::Update {
             page,
             title,
             storage_body,
             version,
         } => {
+            app::ensure_writable(&runtime)?;
             let summary = app::page_update(&api, &page, title, storage_body, version)?;
             print_json_or_human(global.output, &summary, |summary| {
                 println!("Updated {} [{}]", summary.title, summary.id);
@@ -329,6 +477,7 @@ fn dispatch_page(global: &GlobalArgs, command: PageCommand) -> Result<()> {
             after,
             title,
         } => {
+            app::ensure_writable(&runtime)?;
             let target = parse_move_target(to_parent, before, after)?;
             let summary = app::page_move(&api, &page, target, title)?;
             print_json_or_human(global.output, &summary, |summary| {
@@ -336,6 +485,7 @@ fn dispatch_page(global: &GlobalArgs, command: PageCommand) -> Result<()> {
             })
         }
         PageCommand::Archive { page } => {
+            app::ensure_writable(&runtime)?;
             let result = app::page_archive(&api, &page)?;
             print_json_or_human(global.output, &result, |result| {
                 println!("Archive task queued: {}", result.task_id);
@@ -346,15 +496,16 @@ fn dispatch_page(global: &GlobalArgs, command: PageCommand) -> Result<()> {
             mode,
             yes_im_sure,
         } => {
+            app::ensure_writable(&runtime)?;
             app::page_delete(&api, &page, mode, yes_im_sure)?;
             println!("Page deletion request accepted.");
             Ok(())
         }
         PageCommand::Patch {
+            page,
             patch_file,
             base_file,
             dry_run,
-            ..
         } => {
             let base = fs::read_to_string(base_file)?;
             let patch = fs::read_to_string(patch_file)?;
@@ -363,9 +514,11 @@ fn dispatch_page(global: &GlobalArgs, command: PageCommand) -> Result<()> {
                 println!("{}", updated);
                 Ok(())
             } else {
-                Err(ConfluenceCliError::NotImplemented(
-                    "server-backed page patch update is not implemented yet".to_owned(),
-                ))
+                app::ensure_writable(&runtime)?;
+                let summary = app::page_patch(&api, &page, &base, &patch)?;
+                print_json_or_human(global.output, &summary, |summary| {
+                    println!("Patched {} [{}]", summary.title, summary.id);
+                })
             }
         }
         PageCommand::Export {
@@ -382,14 +535,11 @@ fn dispatch_page(global: &GlobalArgs, command: PageCommand) -> Result<()> {
                 println!("attachments: {}", result.attachment_count);
             })
         }
-        PageCommand::Children { .. } | PageCommand::Create => Err(
-            ConfluenceCliError::NotImplemented("selected page workflow".to_owned()),
-        ),
     }
 }
 
 fn dispatch_attachment(global: &GlobalArgs, command: AttachmentCommand) -> Result<()> {
-    let api = load_api(global)?;
+    let (runtime, api) = load_runtime_and_api(global)?;
     match command {
         AttachmentCommand::List { page } => {
             let attachments = app::attachment_list(&api, &page)?;
@@ -417,6 +567,7 @@ fn dispatch_attachment(global: &GlobalArgs, command: AttachmentCommand) -> Resul
             replace,
             minor_edit,
         } => {
+            app::ensure_writable(&runtime)?;
             let attachments =
                 app::attachment_upload(&api, &page, file, comment, minor_edit, replace)?;
             print_json_or_human(global.output, &attachments, |attachments| {
@@ -424,6 +575,7 @@ fn dispatch_attachment(global: &GlobalArgs, command: AttachmentCommand) -> Resul
             })
         }
         AttachmentCommand::Delete { page, attachment } => {
+            app::ensure_writable(&runtime)?;
             app::attachment_delete(&api, &page, &attachment)?;
             println!("Attachment deletion request accepted.");
             Ok(())
@@ -432,7 +584,7 @@ fn dispatch_attachment(global: &GlobalArgs, command: AttachmentCommand) -> Resul
 }
 
 fn dispatch_property(global: &GlobalArgs, command: PropertyCommand) -> Result<()> {
-    let api = load_api(global)?;
+    let (runtime, api) = load_runtime_and_api(global)?;
     match command {
         PropertyCommand::List { page } => {
             let properties = app::property_list(&api, &page)?;
@@ -450,6 +602,7 @@ fn dispatch_property(global: &GlobalArgs, command: PropertyCommand) -> Result<()
             value,
             value_file,
         } => {
+            app::ensure_writable(&runtime)?;
             let input = read_command_input(
                 value,
                 value_file,
@@ -462,6 +615,7 @@ fn dispatch_property(global: &GlobalArgs, command: PropertyCommand) -> Result<()
             print_json_or_human(global.output, &property, print_property_human)
         }
         PropertyCommand::Delete { page, key } => {
+            app::ensure_writable(&runtime)?;
             app::property_delete(&api, &page, &key)?;
             println!("Property deletion request accepted.");
             Ok(())
@@ -470,7 +624,7 @@ fn dispatch_property(global: &GlobalArgs, command: PropertyCommand) -> Result<()
 }
 
 fn dispatch_comment(global: &GlobalArgs, command: CommentCommand) -> Result<()> {
-    let api = load_api(global)?;
+    let (runtime, api) = load_runtime_and_api(global)?;
     match command {
         CommentCommand::List { page, location } => {
             let comments = app::comment_list(&api, &page, location)?;
@@ -488,6 +642,7 @@ fn dispatch_comment(global: &GlobalArgs, command: CommentCommand) -> Result<()> 
             inline_properties,
             inline_properties_file,
         } => {
+            app::ensure_writable(&runtime)?;
             let input = read_command_input(
                 body,
                 body_file,
@@ -520,7 +675,47 @@ fn dispatch_comment(global: &GlobalArgs, command: CommentCommand) -> Result<()> 
                 println!("Created comment {}", comment.id);
             })
         }
+        CommentCommand::Reply {
+            page,
+            parent_id,
+            body,
+            body_file,
+            body_format,
+            location,
+            inline_properties,
+            inline_properties_file,
+        } => {
+            app::ensure_writable(&runtime)?;
+            let input = read_command_input(
+                body,
+                body_file,
+                "comment reply requires --body or --body-file",
+            )?;
+            let body_storage = convert_body_to_storage(input, body_format)?;
+            let inline_properties = if matches!(location, CommentLocation::Inline) {
+                read_optional_json(
+                    inline_properties,
+                    inline_properties_file,
+                    "inline comment reply requires --inline-properties or --inline-properties-file",
+                )?
+            } else {
+                read_optional_json(inline_properties, inline_properties_file, "")?
+            };
+
+            let comment = app::comment_create(
+                &api,
+                &page,
+                body_storage,
+                location,
+                Some(parent_id),
+                inline_properties,
+            )?;
+            print_json_or_human(global.output, &comment, |comment| {
+                println!("Created reply {}", comment.id);
+            })
+        }
         CommentCommand::Delete { comment } => {
+            app::ensure_writable(&runtime)?;
             app::comment_delete(&api, &comment)?;
             println!("Comment deletion request accepted.");
             Ok(())
@@ -537,6 +732,95 @@ fn dispatch_convert(command: ConvertCommand) -> Result<()> {
     let output = convert_text(&input, command.from, command.to)?;
     println!("{output}");
     Ok(())
+}
+
+fn config_init(global: &GlobalArgs, name: &str, profile_args: ProfileArgs) -> Result<()> {
+    let path = config_path(global);
+    let existing = load_config(&path)?;
+    if !existing.profiles.is_empty() {
+        return Err(ConfluenceCliError::Config(
+            "config already exists; use profile add or profile use instead".to_owned(),
+        ));
+    }
+
+    let profile = profile_from_args(profile_args)?;
+    let config = init_config(&path, name, profile)?;
+    print_profiles_human(&RuntimeConfig {
+        config,
+        resolved_profile: None,
+    });
+    Ok(())
+}
+
+fn profile_add(
+    global: &GlobalArgs,
+    name: &str,
+    profile_args: ProfileArgs,
+    activate: bool,
+) -> Result<()> {
+    let path = config_path(global);
+    let profile = profile_from_args(profile_args)?;
+    let config = upsert_profile(&path, name, profile, activate)?;
+    print_profiles_human(&RuntimeConfig {
+        config,
+        resolved_profile: None,
+    });
+    Ok(())
+}
+
+fn profile_use(global: &GlobalArgs, name: &str) -> Result<()> {
+    let path = config_path(global);
+    let config = set_active_profile(&path, name)?;
+    print_profiles_human(&RuntimeConfig {
+        config,
+        resolved_profile: None,
+    });
+    Ok(())
+}
+
+fn profile_remove(global: &GlobalArgs, name: &str) -> Result<()> {
+    let path = config_path(global);
+    let config = remove_profile(&path, name)?;
+    print_profiles_human(&RuntimeConfig {
+        config,
+        resolved_profile: None,
+    });
+    Ok(())
+}
+
+fn profile_from_args(args: ProfileArgs) -> Result<Profile> {
+    let domain = args.domain.ok_or_else(|| {
+        ConfluenceCliError::Config("profile configuration requires --domain".to_owned())
+    })?;
+
+    let auth_type = args.auth_type.or_else(|| {
+        if args.email.is_some() {
+            Some(AuthKind::Basic)
+        } else if args.api_token.is_some() {
+            Some(AuthKind::Bearer)
+        } else {
+            None
+        }
+    });
+
+    Ok(Profile {
+        domain: Some(domain),
+        protocol: args.protocol,
+        api_path: args.api_path,
+        auth_type,
+        email: args.email,
+        username: args.username,
+        api_token: args.api_token,
+        password: args.password,
+        read_only: args.read_only.then_some(true),
+    })
+}
+
+fn config_path(global: &GlobalArgs) -> PathBuf {
+    global
+        .config_path
+        .clone()
+        .unwrap_or_else(default_config_path)
 }
 
 fn read_command_input(
@@ -592,14 +876,22 @@ fn load_runtime_context(global: &GlobalArgs) -> Result<RuntimeContext> {
     RuntimeContext::load(&options)
 }
 
-fn load_api(global: &GlobalArgs) -> Result<HttpConfluenceApi> {
+fn load_runtime_and_api(global: &GlobalArgs) -> Result<(RuntimeContext, HttpConfluenceApi)> {
     let runtime = load_runtime_context(global)?;
     let profile = runtime
         .runtime_config
         .resolved_profile
         .clone()
         .ok_or_else(|| ConfluenceCliError::Config("no active or selected profile".to_owned()))?;
-    HttpConfluenceApi::new(profile)
+    Ok((runtime, HttpConfluenceApi::new(profile)?))
+}
+
+fn convert_body_to_storage(body: String, format: BodyFormat) -> Result<String> {
+    if matches!(format, BodyFormat::Storage) {
+        Ok(body)
+    } else {
+        convert_text(&body, format, BodyFormat::Storage)
+    }
 }
 
 fn parse_move_target(
@@ -835,6 +1127,89 @@ mod tests {
                 assert_eq!(body.as_deref(), Some("hello"));
                 assert_eq!(body_format, BodyFormat::Markdown);
                 assert_eq!(location, CommentLocation::Footer);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_comment_reply_flags() {
+        let cli = Cli::parse_from([
+            "confluence",
+            "comment",
+            "reply",
+            "123",
+            "c-1",
+            "--body",
+            "hello",
+        ]);
+
+        match cli.command {
+            Command::Comment(CommentCommand::Reply {
+                page,
+                parent_id,
+                body,
+                ..
+            }) => {
+                assert_eq!(page, PageRef::Id(crate::domain::PageId::new(123)));
+                assert_eq!(parent_id, "c-1");
+                assert_eq!(body.as_deref(), Some("hello"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_config_init_with_domain() {
+        let cli = Cli::parse_from([
+            "confluence",
+            "config",
+            "init",
+            "--name",
+            "work",
+            "--domain",
+            "example.atlassian.net",
+        ]);
+
+        match cli.command {
+            Command::Config(ConfigCommand::Init { name, profile }) => {
+                assert_eq!(name, "work");
+                assert_eq!(profile.domain.as_deref(), Some("example.atlassian.net"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_page_create_child_command() {
+        let cli = Cli::parse_from([
+            "confluence",
+            "page",
+            "create-child",
+            "123",
+            "--title",
+            "Child",
+            "--body",
+            "# hi",
+        ]);
+
+        match cli.command {
+            Command::Page(PageCommand::CreateChild { parent, title, .. }) => {
+                assert_eq!(parent, PageRef::Id(crate::domain::PageId::new(123)));
+                assert_eq!(title, "Child");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_page_search_cql_flag() {
+        let cli = Cli::parse_from(["confluence", "page", "search", "type=page", "--cql"]);
+
+        match cli.command {
+            Command::Page(PageCommand::Search { query, cql }) => {
+                assert_eq!(query, "type=page");
+                assert!(cql);
             }
             other => panic!("unexpected command: {other:?}"),
         }

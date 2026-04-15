@@ -1,3 +1,4 @@
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -6,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use crate::support::{ConfluenceCliError, Result};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum AuthKind {
     Basic,
@@ -78,6 +79,16 @@ pub fn load_config(path: &Path) -> Result<ConfigFile> {
     Ok(serde_json::from_str(&content)?)
 }
 
+pub fn save_config(path: &Path, config: &ConfigFile) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let content = serde_json::to_string_pretty(config)?;
+    fs::write(path, content)?;
+    Ok(())
+}
+
 pub fn default_config_path() -> PathBuf {
     if let Some(user_profile) = env::var_os("USERPROFILE") {
         return PathBuf::from(user_profile)
@@ -111,6 +122,60 @@ pub fn load_runtime(options: &ResolveOptions) -> Result<RuntimeConfig> {
         config,
         resolved_profile,
     })
+}
+
+pub fn init_config(path: &Path, profile_name: &str, profile: Profile) -> Result<ConfigFile> {
+    let mut config = ConfigFile {
+        active_profile: Some(profile_name.to_owned()),
+        ..ConfigFile::default()
+    };
+    config.profiles.insert(profile_name.to_owned(), profile);
+    save_config(path, &config)?;
+    Ok(config)
+}
+
+pub fn upsert_profile(
+    path: &Path,
+    profile_name: &str,
+    profile: Profile,
+    set_active: bool,
+) -> Result<ConfigFile> {
+    let mut config = load_config(path)?;
+    config.profiles.insert(profile_name.to_owned(), profile);
+    if set_active {
+        config.active_profile = Some(profile_name.to_owned());
+    }
+    save_config(path, &config)?;
+    Ok(config)
+}
+
+pub fn set_active_profile(path: &Path, profile_name: &str) -> Result<ConfigFile> {
+    let mut config = load_config(path)?;
+    if !config.profiles.contains_key(profile_name) {
+        return Err(ConfluenceCliError::Config(format!(
+            "profile '{profile_name}' not found"
+        )));
+    }
+
+    config.active_profile = Some(profile_name.to_owned());
+    save_config(path, &config)?;
+    Ok(config)
+}
+
+pub fn remove_profile(path: &Path, profile_name: &str) -> Result<ConfigFile> {
+    let mut config = load_config(path)?;
+    if config.profiles.remove(profile_name).is_none() {
+        return Err(ConfluenceCliError::Config(format!(
+            "profile '{profile_name}' not found"
+        )));
+    }
+
+    if config.active_profile.as_deref() == Some(profile_name) {
+        config.active_profile = config.profiles.keys().next().cloned();
+    }
+
+    save_config(path, &config)?;
+    Ok(config)
 }
 
 pub fn resolve_profile(config: &ConfigFile, profile_name: &str) -> Result<ResolvedProfile> {
@@ -409,5 +474,78 @@ mod tests {
             .expect_err("basic auth without token should fail");
 
         assert!(matches!(error, ConfluenceCliError::Config(_)));
+    }
+
+    #[test]
+    fn init_and_upsert_profile_persist_to_disk() {
+        let _lock = env_lock().lock().expect("env lock should succeed");
+        let dir = tempdir().expect("tempdir should be created");
+        let path = dir.path().join("config.json");
+
+        init_config(
+            &path,
+            "default",
+            Profile {
+                domain: Some("example.atlassian.net".to_owned()),
+                auth_type: Some(AuthKind::Bearer),
+                ..Profile::default()
+            },
+        )
+        .expect("config should initialize");
+
+        upsert_profile(
+            &path,
+            "work",
+            Profile {
+                domain: Some("work.atlassian.net".to_owned()),
+                auth_type: Some(AuthKind::Basic),
+                email: Some("oscar@example.com".to_owned()),
+                api_token: Some("token".to_owned()),
+                ..Profile::default()
+            },
+            true,
+        )
+        .expect("profile should upsert");
+
+        let config = load_config(&path).expect("config should reload");
+        assert_eq!(config.active_profile.as_deref(), Some("work"));
+        assert!(config.profiles.contains_key("default"));
+        assert!(config.profiles.contains_key("work"));
+    }
+
+    #[test]
+    fn set_active_and_remove_profile_update_active_profile() {
+        let _lock = env_lock().lock().expect("env lock should succeed");
+        let dir = tempdir().expect("tempdir should be created");
+        let path = dir.path().join("config.json");
+
+        let mut config = ConfigFile {
+            active_profile: Some("default".to_owned()),
+            ..ConfigFile::default()
+        };
+        config.profiles.insert(
+            "default".to_owned(),
+            Profile {
+                domain: Some("example.atlassian.net".to_owned()),
+                auth_type: Some(AuthKind::Bearer),
+                ..Profile::default()
+            },
+        );
+        config.profiles.insert(
+            "work".to_owned(),
+            Profile {
+                domain: Some("work.atlassian.net".to_owned()),
+                auth_type: Some(AuthKind::Bearer),
+                ..Profile::default()
+            },
+        );
+        save_config(&path, &config).expect("config should save");
+
+        let updated = set_active_profile(&path, "work").expect("active profile should change");
+        assert_eq!(updated.active_profile.as_deref(), Some("work"));
+
+        let updated = remove_profile(&path, "work").expect("profile should be removed");
+        assert_eq!(updated.active_profile.as_deref(), Some("default"));
+        assert!(!updated.profiles.contains_key("work"));
     }
 }

@@ -1,11 +1,13 @@
 use crate::api::{
     ArchiveResult, AttachmentSummary, AttachmentUploadRequest, CommentCreateRequest,
-    CommentSummary, ConfluenceApi, ContentProperty, MovePageRequest, PageBody, PageSummary,
-    SpaceSummary, UpdatePageRequest,
+    CommentSummary, ConfluenceApi, ContentProperty, CreatePageRequest, MovePageRequest, PageBody,
+    PageSummary, SpaceSummary, UpdatePageRequest,
 };
 use crate::config::{ResolveOptions, RuntimeConfig, load_runtime};
-use crate::convert::{build_bundle_metadata, convert_text, export_bundle_file};
-use crate::domain::{BodyFormat, CommentLocation, DeleteMode, MoveTarget, PageRef};
+use crate::convert::{
+    apply_unified_patch, build_bundle_metadata, convert_text, export_bundle_file,
+};
+use crate::domain::{BodyFormat, CommentLocation, DeleteMode, MoveTarget, PageId, PageRef};
 use crate::support::{ConfluenceCliError, Result};
 use serde_json::Value;
 use std::fs;
@@ -35,8 +37,27 @@ pub fn list_spaces<A: ConfluenceApi>(api: &A) -> Result<Vec<SpaceSummary>> {
     api.list_spaces()
 }
 
+pub fn ensure_writable(runtime: &RuntimeContext) -> Result<()> {
+    if runtime
+        .runtime_config
+        .resolved_profile
+        .as_ref()
+        .is_some_and(|profile| profile.read_only)
+    {
+        return Err(ConfluenceCliError::Config(
+            "active profile is read-only; this command would mutate Confluence".to_owned(),
+        ));
+    }
+
+    Ok(())
+}
+
 pub fn page_info<A: ConfluenceApi>(api: &A, page: &PageRef) -> Result<PageSummary> {
     api.get_page_info(page)
+}
+
+pub fn page_children<A: ConfluenceApi>(api: &A, page: &PageRef) -> Result<Vec<PageSummary>> {
+    api.list_child_pages(page)
 }
 
 pub fn page_read<A: ConfluenceApi>(
@@ -55,6 +76,16 @@ pub fn page_search<A: ConfluenceApi>(api: &A, query: &str) -> Result<Vec<PageSum
     }
 
     api.search_pages(query)
+}
+
+pub fn page_search_cql<A: ConfluenceApi>(api: &A, query: &str) -> Result<Vec<PageSummary>> {
+    if query.trim().is_empty() {
+        return Err(ConfluenceCliError::Config(
+            "search query must not be empty".to_owned(),
+        ));
+    }
+
+    api.search_pages_cql(query)
 }
 
 pub fn page_archive<A: ConfluenceApi>(api: &A, page: &PageRef) -> Result<ArchiveResult> {
@@ -100,6 +131,95 @@ pub fn page_update<A: ConfluenceApi>(
         title,
         storage_body,
         version,
+    })
+}
+
+pub fn page_create<A: ConfluenceApi>(
+    api: &A,
+    title: String,
+    storage_body: String,
+    space_id: Option<String>,
+    space_key: Option<String>,
+    parent: Option<PageRef>,
+) -> Result<PageSummary> {
+    if title.trim().is_empty() {
+        return Err(ConfluenceCliError::Config(
+            "page create requires a non-empty title".to_owned(),
+        ));
+    }
+
+    if storage_body.trim().is_empty() {
+        return Err(ConfluenceCliError::Config(
+            "page create requires a non-empty storage body".to_owned(),
+        ));
+    }
+
+    if space_id.is_some() && space_key.is_some() {
+        return Err(ConfluenceCliError::Config(
+            "page create accepts either space id or space key, not both".to_owned(),
+        ));
+    }
+
+    let resolved_parent_id = match parent.as_ref() {
+        Some(PageRef::Id(page_id)) => Some(*page_id),
+        Some(PageRef::Url(_)) => Some(PageId::new(
+            api.get_page_info(parent.as_ref().expect("parent exists"))?
+                .id,
+        )),
+        None => None,
+    };
+
+    let resolved_space_id = if let Some(space_id) = space_id {
+        space_id
+    } else if let Some(space_key) = space_key {
+        api.list_spaces()?
+            .into_iter()
+            .find(|space| space.key.eq_ignore_ascii_case(&space_key))
+            .map(|space| space.id)
+            .ok_or_else(|| {
+                ConfluenceCliError::Config(format!("space key '{space_key}' not found"))
+            })?
+    } else if let Some(parent) = parent.as_ref() {
+        api.get_page_info(parent)?.space_id.ok_or_else(|| {
+            ConfluenceCliError::Config("parent page did not expose a space id".to_owned())
+        })?
+    } else {
+        return Err(ConfluenceCliError::Config(
+            "page create requires either --space-id, --space-key, or --parent".to_owned(),
+        ));
+    };
+
+    api.create_page(CreatePageRequest {
+        title,
+        storage_body,
+        space_id: resolved_space_id,
+        parent_id: resolved_parent_id,
+    })
+}
+
+pub fn page_patch<A: ConfluenceApi>(
+    api: &A,
+    page: &PageRef,
+    base: &str,
+    patch: &str,
+) -> Result<PageSummary> {
+    let current = api.read_page(page, BodyFormat::Storage)?;
+    if current.content != base {
+        return Err(ConfluenceCliError::Config(
+            "page patch base file does not match the current remote storage body".to_owned(),
+        ));
+    }
+
+    let version = current.page.version.ok_or_else(|| {
+        ConfluenceCliError::Config("page patch requires a current version".to_owned())
+    })?;
+    let updated_body = apply_unified_patch(base, patch)?;
+
+    api.update_page(UpdatePageRequest {
+        page: page.clone(),
+        title: current.page.title,
+        storage_body: updated_body,
+        version: version + 1,
     })
 }
 
@@ -359,6 +479,26 @@ mod tests {
             }])
         }
 
+        fn create_page(&self, request: CreatePageRequest) -> Result<PageSummary> {
+            Ok(PageSummary {
+                id: request.parent_id.map_or(10, |parent| parent.get() + 1),
+                title: request.title,
+                status: Some("current".to_owned()),
+                space_id: Some(request.space_id),
+                version: Some(1),
+            })
+        }
+
+        fn list_child_pages(&self, _page: &PageRef) -> Result<Vec<PageSummary>> {
+            Ok(vec![PageSummary {
+                id: 2,
+                title: "Child Page".to_owned(),
+                status: Some("current".to_owned()),
+                space_id: Some("100".to_owned()),
+                version: Some(1),
+            }])
+        }
+
         fn get_page_info(&self, _page: &PageRef) -> Result<PageSummary> {
             Ok(PageSummary {
                 id: 1,
@@ -383,6 +523,10 @@ mod tests {
         }
 
         fn search_pages(&self, _query: &str) -> Result<Vec<PageSummary>> {
+            Ok(vec![self.get_page_info(&PageRef::Id(PageId::new(1)))?])
+        }
+
+        fn search_pages_cql(&self, _query: &str) -> Result<Vec<PageSummary>> {
             Ok(vec![self.get_page_info(&PageRef::Id(PageId::new(1)))?])
         }
 
@@ -648,6 +792,61 @@ mod tests {
         let api = FakeApi::default();
         let error = property_get(&api, &PageRef::Id(PageId::new(1)), "  ")
             .expect_err("blank property keys should fail");
+        assert!(matches!(error, ConfluenceCliError::Config(_)));
+    }
+
+    #[test]
+    fn create_page_can_resolve_space_key() {
+        let api = FakeApi::default();
+        let summary = page_create(
+            &api,
+            "New Page".to_owned(),
+            "<p>Hello</p>".to_owned(),
+            None,
+            Some("ENG".to_owned()),
+            None,
+        )
+        .expect("page create should succeed");
+
+        assert_eq!(summary.title, "New Page");
+        assert_eq!(summary.space_id.as_deref(), Some("100"));
+    }
+
+    #[test]
+    fn patch_requires_matching_base() {
+        let api = FakeApi::default();
+        let error = page_patch(
+            &api,
+            &PageRef::Id(PageId::new(1)),
+            "<p>Different</p>",
+            "--- original\n+++ updated\n@@ -1 +1 @@\n-<p>Different</p>\n+<p>Hello</p>\n",
+        )
+        .expect_err("mismatched patch bases should fail");
+
+        assert!(matches!(error, ConfluenceCliError::Config(_)));
+    }
+
+    #[test]
+    fn read_only_runtime_rejects_mutations() {
+        let runtime = RuntimeContext {
+            runtime_config: RuntimeConfig {
+                config: crate::config::ConfigFile::default(),
+                resolved_profile: Some(crate::config::ResolvedProfile {
+                    name: Some("work".to_owned()),
+                    domain: "example.atlassian.net".to_owned(),
+                    protocol: "https".to_owned(),
+                    api_path: "/wiki/rest/api".to_owned(),
+                    auth_type: crate::config::AuthKind::Bearer,
+                    email: None,
+                    username: None,
+                    api_token: Some("token".to_owned()),
+                    password: None,
+                    read_only: true,
+                }),
+            },
+        };
+
+        let error = ensure_writable(&runtime).expect_err("read-only runtime should fail");
         assert!(matches!(error, ConfluenceCliError::Config(_)));
     }
 }
