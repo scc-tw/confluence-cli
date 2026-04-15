@@ -351,17 +351,21 @@ impl ConfluenceApi for HttpConfluenceApi {
     }
 
     fn search_pages_cql(&self, query: &str) -> Result<Vec<PageSummary>> {
-        let request = self.authed(
-            self.client
-                .get(self.v1_url("/content/search"))
-                .query(&[("cql", query.to_owned()), ("limit", "25".to_owned())]),
-        )?;
-        let response: SearchResponse = request.send()?.error_for_status()?.json()?;
-        Ok(response
-            .results
-            .into_iter()
-            .map(PageV1::into_summary)
-            .collect())
+        let mut next_url = Some(format!(
+            "{}?cql={}&limit=25",
+            self.v1_url("/content/search"),
+            urlencoding::encode(query)
+        ));
+        let mut pages = Vec::new();
+
+        while let Some(url) = next_url.take() {
+            let request = self.authed(self.client.get(url))?;
+            let response: SearchResponse = request.send()?.error_for_status()?.json()?;
+            pages.extend(response.results.into_iter().map(PageV1::into_summary));
+            next_url = response.links.next.map(|next| self.absolute_url(&next));
+        }
+
+        Ok(pages)
     }
 
     fn archive_page(&self, page: &PageRef) -> Result<ArchiveResult> {
@@ -922,7 +926,10 @@ struct PageBodySection {
 
 #[derive(Debug, Deserialize)]
 struct SearchResponse {
+    #[serde(default)]
     results: Vec<PageV1>,
+    #[serde(rename = "_links", default)]
+    links: ResponseLinks,
 }
 
 #[derive(Debug, Deserialize)]
