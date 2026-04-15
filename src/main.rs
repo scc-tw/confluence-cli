@@ -1,3 +1,6 @@
 fn main() {
-    println!("Hello, world!");
+    if let Err(error) = confluence_cli::run() {
+        eprintln!("error: {error}");
+        std::process::exit(1);
+    }
 }
