@@ -1,5 +1,5 @@
-use reqwest::StatusCode;
 use reqwest::header::CONTENT_TYPE;
+use reqwest::StatusCode;
 use serde_json::Value;
 
 use crate::application::models::ContentProperty;
@@ -7,8 +7,8 @@ use crate::application::ports::PropertiesApi;
 use crate::domain::PageRef;
 use crate::support::{ConfluenceCliError, Result};
 
-use super::HttpConfluenceApi;
 use super::dto::{PropertyListResponse, PropertyV1};
+use super::HttpConfluenceApi;
 
 impl PropertiesApi for HttpConfluenceApi {
     fn list_properties(&self, page: &PageRef) -> Result<Vec<ContentProperty>> {
