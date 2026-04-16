@@ -1,18 +1,50 @@
+use std::io::Write;
+
 use serde::Serialize;
 
 use crate::application::models::{AttachmentSummary, CommentSummary, ContentProperty, PageSummary};
 use crate::application::pages::PageExportResult;
-use crate::application::runtime::RuntimeConfig;
+use crate::application::runtime::{ResolvedProfile, RuntimeConfig};
 use crate::render;
 use crate::support::Result;
 
 use super::OutputFormat;
 
-pub(super) fn print_profiles_human(runtime: &RuntimeConfig) {
-    println!("{}", render::render_profiles_human(runtime));
+pub(super) fn write_profiles<W: Write>(
+    output: OutputFormat,
+    runtime: &RuntimeConfig,
+    writer: &mut W,
+) -> Result<()> {
+    match output {
+        OutputFormat::Human => write_profiles_human(runtime, writer),
+        OutputFormat::Json => write_profiles_json(runtime, writer),
+    }
 }
 
-pub(super) fn print_profiles_json(runtime: &RuntimeConfig) -> Result<()> {
+pub(super) fn write_resolved_profile<W: Write>(
+    output: OutputFormat,
+    profile: &ResolvedProfile,
+    writer: &mut W,
+) -> Result<()> {
+    match output {
+        OutputFormat::Human => {
+            writeln!(writer, "{}", render::render_resolved_profile_human(profile))?
+        }
+        OutputFormat::Json => writeln!(
+            writer,
+            "{}",
+            render::render_json(&ResolvedProfileView::from(profile))?
+        )?,
+    }
+    Ok(())
+}
+
+fn write_profiles_human<W: Write>(runtime: &RuntimeConfig, writer: &mut W) -> Result<()> {
+    writeln!(writer, "{}", render::render_profiles_human(runtime))?;
+    Ok(())
+}
+
+fn write_profiles_json<W: Write>(runtime: &RuntimeConfig, writer: &mut W) -> Result<()> {
     #[derive(serde::Serialize)]
     struct ProfileEntry<'a> {
         name: &'a str,
@@ -29,8 +61,31 @@ pub(super) fn print_profiles_json(runtime: &RuntimeConfig) -> Result<()> {
         })
         .collect();
 
-    println!("{}", render::render_json(&entries)?);
+    writeln!(writer, "{}", render::render_json(&entries)?)?;
     Ok(())
+}
+
+#[derive(Serialize)]
+struct ResolvedProfileView<'a> {
+    name: Option<&'a str>,
+    account: Option<&'a str>,
+    domain: &'a str,
+    auth: &'a crate::profile::AuthKind,
+    api_path: &'a str,
+    read_only: bool,
+}
+
+impl<'a> From<&'a ResolvedProfile> for ResolvedProfileView<'a> {
+    fn from(profile: &'a ResolvedProfile) -> Self {
+        Self {
+            name: profile.name.as_deref(),
+            account: profile.email.as_deref().or(profile.username.as_deref()),
+            domain: &profile.domain,
+            auth: &profile.auth_type,
+            api_path: &profile.api_path,
+            read_only: profile.read_only,
+        }
+    }
 }
 
 pub(super) fn print_json_or_human<T, F>(output: OutputFormat, value: &T, human: F) -> Result<()>

@@ -2,7 +2,9 @@ use serde::Serialize;
 
 use crate::application::models::{AttachmentSummary, CommentSummary, ContentProperty, PageSummary};
 use crate::application::pages::PageExportResult;
+use crate::application::runtime::ResolvedProfile;
 use crate::application::runtime::RuntimeConfig;
+use crate::profile::AuthKind;
 use crate::support::Result;
 
 pub fn render_json<T: Serialize + ?Sized>(value: &T) -> Result<String> {
@@ -28,6 +30,25 @@ pub fn render_profiles_human(runtime: &RuntimeConfig) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+pub fn render_resolved_profile_human(profile: &ResolvedProfile) -> String {
+    [
+        format!("name: {}", profile.name.as_deref().unwrap_or("(none)")),
+        format!(
+            "account: {}",
+            profile
+                .email
+                .as_deref()
+                .or(profile.username.as_deref())
+                .unwrap_or("(none)")
+        ),
+        format!("domain: {}", profile.domain),
+        format!("auth: {}", render_auth_kind(&profile.auth_type)),
+        format!("api path: {}", profile.api_path),
+        format!("read-only: {}", profile.read_only),
+    ]
+    .join("\n")
 }
 
 pub fn render_page_summary_human(summary: &PageSummary) -> String {
@@ -139,4 +160,12 @@ pub fn render_comments_human(comments: &[CommentSummary]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn render_auth_kind(auth: &AuthKind) -> &'static str {
+    match auth {
+        AuthKind::Basic => "basic",
+        AuthKind::Bearer => "bearer",
+        AuthKind::Mtls => "mtls",
+    }
 }
