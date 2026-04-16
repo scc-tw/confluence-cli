@@ -1,7 +1,5 @@
 use keyring::Entry;
-#[cfg(test)]
 use std::collections::HashMap;
-#[cfg(test)]
 use std::sync::Mutex;
 
 use crate::support::{ConfluenceCliError, Result};
@@ -70,20 +68,17 @@ impl SecretStore for KeyringSecretStore {
     }
 }
 
-#[cfg(test)]
 #[derive(Debug, Default)]
 pub struct MemorySecretStore {
     values: Mutex<HashMap<(String, SecretKind), String>>,
 }
 
-#[cfg(test)]
 impl MemorySecretStore {
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-#[cfg(test)]
 impl SecretStore for MemorySecretStore {
     fn get(&self, profile_id: &str, kind: SecretKind) -> Result<Option<String>> {
         Ok(self
