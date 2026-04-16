@@ -15,8 +15,8 @@ mod tests {
     use super::*;
     use crate::application::models::{
         ArchiveResult, AttachmentSummary, AttachmentUploadRequest, CommentCreateRequest,
-        CommentSummary, ContentProperty, CreatePageRequest, MovePageRequest, PageBody, PageSummary,
-        SpaceSummary, UpdatePageRequest,
+        CommentSummary, ContentProperty, CreatePageRequest, MovePageRequest, PageBody,
+        PageContentKind, PageSummary, SpaceSummary, UpdatePageRequest,
     };
     use crate::application::runtime::{
         ensure_writable, ResolvedProfile, RuntimeConfig, RuntimeContext, RuntimeProfiles,
@@ -58,6 +58,7 @@ mod tests {
                 status: Some("current".to_owned()),
                 space_id: Some(request.space_id),
                 version: Some(1),
+                content_kind: PageContentKind::Page,
             })
         }
 
@@ -68,6 +69,7 @@ mod tests {
                 status: Some("current".to_owned()),
                 space_id: Some("100".to_owned()),
                 version: Some(1),
+                content_kind: PageContentKind::Page,
             }])
         }
 
@@ -78,6 +80,7 @@ mod tests {
                 status: Some("current".to_owned()),
                 space_id: Some("100".to_owned()),
                 version: Some(3),
+                content_kind: PageContentKind::Page,
             })
         }
 
@@ -122,6 +125,7 @@ mod tests {
                 status: Some("current".to_owned()),
                 space_id: Some("100".to_owned()),
                 version: Some(request.version),
+                content_kind: PageContentKind::Page,
             })
         }
 
@@ -133,6 +137,7 @@ mod tests {
                 status: Some("current".to_owned()),
                 space_id: Some("100".to_owned()),
                 version: Some(4),
+                content_kind: PageContentKind::Page,
             })
         }
     }

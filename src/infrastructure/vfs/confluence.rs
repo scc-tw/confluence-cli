@@ -1,4 +1,4 @@
-use crate::application::models::{PageSummary, SpaceSummary};
+use crate::application::models::{PageContentKind, PageSummary, SpaceSummary};
 use crate::application::vfs::{
     DirEntry, NodeCapability, NodeHandle, NodeKind, NodeStat, PageNode, SpaceNode,
     VirtualFileSystem,
@@ -39,14 +39,14 @@ impl<A: PagesApi> VirtualFileSystem for ConfluenceVfs<A> {
                 has_children: None,
             }),
             NodeHandle::Page(page) => Ok(NodeStat {
-                kind: NodeKind::Page,
+                kind: node_kind_for(page.content_kind.clone()),
                 name: page.title.clone(),
-                capabilities: vec![
-                    NodeCapability::Read,
-                    NodeCapability::List,
-                    NodeCapability::Traverse,
-                ],
-                has_children: None,
+                capabilities: page_capabilities(&page.content_kind),
+                has_children: if matches!(page.content_kind, PageContentKind::Folder) {
+                    Some(true)
+                } else {
+                    None
+                },
             }),
         }
     }
@@ -129,22 +129,24 @@ impl<A: PagesApi> ConfluenceVfs<A> {
         let title = summary.title;
         let id = summary.id;
         let space_id = summary.space_id;
+        let content_kind = summary.content_kind;
         Ok(DirEntry {
             name: title.clone(),
             handle: NodeHandle::Page(PageNode {
                 id,
                 title: title.clone(),
                 space_id,
+                content_kind: content_kind.clone(),
             }),
             stat: NodeStat {
-                kind: NodeKind::Page,
+                kind: node_kind_for(content_kind.clone()),
                 name: title,
-                capabilities: vec![
-                    NodeCapability::Read,
-                    NodeCapability::List,
-                    NodeCapability::Traverse,
-                ],
-                has_children: None,
+                capabilities: page_capabilities(&content_kind),
+                has_children: if matches!(content_kind, PageContentKind::Folder) {
+                    Some(true)
+                } else {
+                    None
+                },
             },
         })
     }
@@ -193,5 +195,28 @@ impl<A: PagesApi> ConfluenceVfs<A> {
             NodeHandle::Space(space) => format!("/{}", space.key),
             NodeHandle::Page(page) => page.title.clone(),
         }
+    }
+}
+
+fn node_kind_for(content_kind: PageContentKind) -> NodeKind {
+    match content_kind {
+        PageContentKind::Page => NodeKind::Page,
+        PageContentKind::Folder => NodeKind::Folder,
+    }
+}
+
+fn page_capabilities(content_kind: &PageContentKind) -> Vec<NodeCapability> {
+    match content_kind {
+        PageContentKind::Page => vec![
+            NodeCapability::Read,
+            NodeCapability::List,
+            NodeCapability::Traverse,
+        ],
+        PageContentKind::Folder => vec![
+            NodeCapability::List,
+            NodeCapability::Traverse,
+            NodeCapability::Search,
+            NodeCapability::Create,
+        ],
     }
 }
