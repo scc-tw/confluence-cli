@@ -137,7 +137,7 @@ fn shell_root_ls_lists_spaces() {
         .expect("shell output should be captured");
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
-    assert!(stdout.contains("ALPHA/"));
+    assert!(stdout.contains("Workspace Alpha/"));
     spaces.assert();
 }
 
@@ -1362,6 +1362,37 @@ fn shell_rejects_pipelines_longer_than_limit() {
 }
 
 #[test]
+fn shell_clear_emits_terminal_escape_sequence() {
+    let server = MockServer::start();
+    let dir = tempdir().expect("tempdir should be created");
+    let config_path = dir.path().join("config.json");
+    write_minimal_config(&config_path);
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_confluence"));
+    configure_command(&mut command, &config_path, &server);
+    let mut child = command
+        .arg("shell")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("shell should start");
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should exist")
+        .write_all(b"clear\nexit\n")
+        .expect("shell input should be written");
+
+    let output = child
+        .wait_with_output()
+        .expect("shell output should be captured");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("\u{1b}[2J\u{1b}[H"));
+}
+
+#[test]
 fn root_help_advertises_shell_and_drill_down() {
     let output = Command::new(env!("CARGO_BIN_EXE_confluence"))
         .arg("--help")
@@ -1407,6 +1438,7 @@ fn shell_help_shows_filesystem_commands() {
     assert!(stdout.contains("ls"));
     assert!(stdout.contains("ls -l"));
     assert!(stdout.contains("file SPACE/12345"));
+    assert!(stdout.contains("clear"));
     assert!(stdout.contains("cat [--raw|--text|--markdown|--html] [target]"));
     assert!(stdout.contains("grep <pattern> [target]"));
     assert!(stdout.contains("find [target] [--name <pattern>]"));

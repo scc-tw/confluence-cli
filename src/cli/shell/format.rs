@@ -6,9 +6,13 @@ pub enum ListingStyle {
     Long,
 }
 
-pub fn render_listing(entries: &[DirEntry], style: ListingStyle) -> String {
+pub fn render_listing(
+    entries: &[DirEntry],
+    style: ListingStyle,
+    terminal_width: Option<usize>,
+) -> String {
     match style {
-        ListingStyle::Simple => render_listing_columns(entries),
+        ListingStyle::Simple => render_listing_columns(entries, terminal_width),
         ListingStyle::Long => {
             let mut out = String::new();
             for entry in entries {
@@ -44,7 +48,7 @@ pub fn render_file(path: &str, handle: &NodeHandle, stat: &NodeStat) -> String {
 
 fn render_entry(entry: &DirEntry) -> String {
     match &entry.handle {
-        NodeHandle::Space(space) => format!("{}/", space.key),
+        NodeHandle::Space(space) => format!("{}/", space.name),
         NodeHandle::Page(page) => {
             let suffix = if entry.stat.has_children == Some(true) {
                 "/"
@@ -57,13 +61,16 @@ fn render_entry(entry: &DirEntry) -> String {
     }
 }
 
-fn render_listing_columns(entries: &[DirEntry]) -> String {
-    let names = entries.iter().map(render_entry).collect::<Vec<_>>();
+fn render_listing_columns(entries: &[DirEntry], terminal_width: Option<usize>) -> String {
+    let names = entries
+        .iter()
+        .map(|entry| render_entry_with_context(entry, entries))
+        .collect::<Vec<_>>();
     if names.is_empty() {
         return String::new();
     }
 
-    let terminal_width = 100usize;
+    let terminal_width = terminal_width.unwrap_or(100usize).max(40);
     let column_width = names.iter().map(|name| name.len()).max().unwrap_or(0) + 2;
     if column_width >= terminal_width / 2 {
         return format!("{}\n", names.join("\n"));
@@ -88,6 +95,26 @@ fn render_listing_columns(entries: &[DirEntry]) -> String {
     }
 
     format!("{}\n", lines.join("\n"))
+}
+
+fn render_entry_with_context(entry: &DirEntry, all_entries: &[DirEntry]) -> String {
+    match &entry.handle {
+        NodeHandle::Space(space) => {
+            let duplicate_name_count = all_entries
+                .iter()
+                .filter(|candidate| match &candidate.handle {
+                    NodeHandle::Space(other) => other.name == space.name,
+                    _ => false,
+                })
+                .count();
+            if duplicate_name_count > 1 {
+                format!("{}({})/", space.name, space.key)
+            } else {
+                format!("{}/", space.name)
+            }
+        }
+        _ => render_entry(entry),
+    }
 }
 
 fn render_entry_long(entry: &DirEntry) -> String {
@@ -136,13 +163,32 @@ fn render_capabilities(capabilities: &[NodeCapability]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{render_listing, ListingStyle};
-    use crate::{DirEntry, NodeCapability, NodeHandle, NodeKind, NodeStat, PageNode};
+    use crate::{DirEntry, NodeCapability, NodeHandle, NodeKind, NodeStat, PageNode, SpaceNode};
 
     #[test]
     fn simple_listing_uses_columns_for_short_entries() {
         let entries = vec![page("Alpha"), page("Beta"), page("Gamma"), page("Delta")];
-        let rendered = render_listing(&entries, ListingStyle::Simple);
+        let rendered = render_listing(&entries, ListingStyle::Simple, Some(100));
         assert!(rendered.lines().count() < entries.len());
+    }
+
+    #[test]
+    fn space_listing_prefers_display_name() {
+        let entries = vec![
+            space("ALPHA", "Workspace Alpha"),
+            space("BETA", "Workspace Beta"),
+        ];
+        let rendered = render_listing(&entries, ListingStyle::Simple, Some(30));
+        assert!(rendered.contains("Workspace Alpha/"));
+        assert!(rendered.contains("Workspace Beta/"));
+    }
+
+    #[test]
+    fn space_listing_appends_key_when_names_conflict() {
+        let entries = vec![space("ALPHA", "Workspace"), space("BETA", "Workspace")];
+        let rendered = render_listing(&entries, ListingStyle::Simple, Some(60));
+        assert!(rendered.contains("Workspace(ALPHA)/"));
+        assert!(rendered.contains("Workspace(BETA)/"));
     }
 
     fn page(title: &str) -> DirEntry {
@@ -160,6 +206,29 @@ mod tests {
                     NodeCapability::Read,
                     NodeCapability::List,
                     NodeCapability::Traverse,
+                ],
+                has_children: None,
+            },
+        }
+    }
+
+    fn space(key: &str, name: &str) -> DirEntry {
+        DirEntry {
+            name: key.to_owned(),
+            handle: NodeHandle::Space(SpaceNode {
+                id: "100".to_owned(),
+                key: key.to_owned(),
+                name: name.to_owned(),
+                homepage_id: Some(1),
+            }),
+            stat: NodeStat {
+                kind: NodeKind::Space,
+                name: key.to_owned(),
+                capabilities: vec![
+                    NodeCapability::List,
+                    NodeCapability::Traverse,
+                    NodeCapability::Search,
+                    NodeCapability::Create,
                 ],
                 has_children: None,
             },

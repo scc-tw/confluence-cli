@@ -1,5 +1,6 @@
 use crate::support::{ConfluenceCliError, Result};
 use crate::NodeHandle;
+use terminal_size::{terminal_size, Width};
 
 use super::commands;
 use super::format::{render_file, render_listing, ListingStyle};
@@ -12,6 +13,7 @@ pub fn resolve(name: &str) -> Option<Builtin> {
         "pwd" => Some(Builtin::Pwd),
         "ls" => Some(Builtin::Ls),
         "file" => Some(Builtin::File),
+        "clear" | "cls" => Some(Builtin::Clear),
         "cd" => Some(Builtin::Cd),
         "use" => Some(Builtin::UseProfile),
         "exit" | "quit" => Some(Builtin::Exit),
@@ -27,6 +29,7 @@ pub enum Builtin {
     Pwd,
     Ls,
     File,
+    Clear,
     Cd,
     UseProfile,
     Exit,
@@ -73,6 +76,14 @@ pub fn execute(
             Ok((
                 ShellControl::Continue,
                 CommandOutput::Text(render_file(&state.render_lineage(&lineage), handle, &stat)),
+            ))
+        }
+        Builtin::Clear => {
+            reject_in_pipeline("clear", in_pipeline)?;
+            require_arity("clear", argv, 1)?;
+            Ok((
+                ShellControl::Continue,
+                CommandOutput::Text("\u{1b}[2J\u{1b}[H".to_owned()),
             ))
         }
         Builtin::Cd => {
@@ -141,7 +152,7 @@ fn render_listing_output(
         };
         return Ok(format!("{empty}\n"));
     }
-    Ok(render_listing(&entries, style))
+    Ok(render_listing(&entries, style, terminal_width()))
 }
 
 fn require_arity(command: &str, argv: &[String], expected: usize) -> Result<()> {
@@ -171,11 +182,16 @@ fn usage_for(command: &str) -> String {
         "pwd" => "pwd".to_owned(),
         "ls" => "ls [target]".to_owned(),
         "file" => "file [target]".to_owned(),
+        "clear" => "clear".to_owned(),
         "cd" => "cd <space|page|..|/>".to_owned(),
         "help" => "help [topic]".to_owned(),
         "exit" => "exit".to_owned(),
         _ => command.to_owned(),
     }
+}
+
+fn terminal_width() -> Option<usize> {
+    terminal_size().map(|(Width(width), _)| width as usize)
 }
 
 fn parse_ls_args(argv: &[String]) -> Result<(ListingStyle, Option<String>)> {
