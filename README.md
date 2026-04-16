@@ -274,6 +274,7 @@ pwd
 ls
 ls -l
 file SPACE/12345
+clear
 cd SPACE
 cd 12345
 cd ..
@@ -293,6 +294,7 @@ Example shell session:
 confluence/> ls
 confluence/> ls -l
 confluence/> file SPACE/12345
+confluence/> clear
 confluence/> cd SPACE
 confluence/SPACE> ls
 confluence/SPACE> cd 12345
