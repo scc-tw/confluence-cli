@@ -259,6 +259,8 @@ The shell now behaves more like a small virtual filesystem over Confluence:
 - `cd ..` goes up
 - `pwd` shows the current logical path
 - `ls` lists the current directory
+- `ls -l` shows kind and capabilities
+- `file` inspects a single node
 - `cat` reads page content (default: markdown)
 - `grep` searches page text in the current subtree
 - `find` walks the current subtree
@@ -270,6 +272,8 @@ Built-ins:
 help
 pwd
 ls
+ls -l
+file SPACE/12345
 cd SPACE
 cd 12345
 cd ..
@@ -287,6 +291,8 @@ Example shell session:
 
 ```text
 confluence/> ls
+confluence/> ls -l
+confluence/> file SPACE/12345
 confluence/> cd SPACE
 confluence/SPACE> ls
 confluence/SPACE> cd 12345
