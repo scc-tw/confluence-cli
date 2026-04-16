@@ -1,6 +1,10 @@
 mod cat;
 mod find;
 mod grep;
+mod seq;
+mod sleep;
+mod tail;
+mod whoami;
 
 use crate::support::Result;
 
@@ -8,7 +12,10 @@ use super::state::ShellState;
 use super::CommandOutput;
 
 pub fn is_registered(name: &str) -> bool {
-    matches!(name, "cat" | "grep" | "find")
+    matches!(
+        name,
+        "cat" | "grep" | "find" | "whoami" | "seq" | "sleep" | "tail"
+    )
 }
 
 pub fn help_for(name: &str) -> Option<&'static str> {
@@ -21,6 +28,18 @@ pub fn help_for(name: &str) -> Option<&'static str> {
         ),
         "find" => Some(
             "find [target] [--name <pattern>]\n  Recursively walk spaces/pages under the target subtree.",
+        ),
+        "tail" => Some(
+            "tail [-n <count>|-n +<start>] [target]\n  Print the last lines of piped input or the current/target page rendered as text.",
+        ),
+        "whoami" => Some(
+            "whoami\n  Show the active shell identity derived from the resolved Confluence profile.",
+        ),
+        "seq" => Some(
+            "seq <end> | seq <start> <end> | seq <start> <step> <end>\n  Print a numeric sequence.",
+        ),
+        "sleep" => Some(
+            "sleep <duration>\n  Delay for a duration like 1s, 250ms, 2m, or 1h.",
         ),
         _ => None,
     }
@@ -35,6 +54,10 @@ pub fn execute(
         Some("cat") => cat::execute(state, argv, input),
         Some("grep") => grep::execute(state, argv, input),
         Some("find") => find::execute(state, argv, input),
+        Some("tail") => tail::execute(state, argv, input),
+        Some("whoami") => whoami::execute(state, argv, input),
+        Some("seq") => seq::execute(state, argv, input),
+        Some("sleep") => sleep::execute(state, argv, input),
         _ => unreachable!("checked by registry before dispatch"),
     }
 }
@@ -48,6 +71,10 @@ mod tests {
         assert!(is_registered("cat"));
         assert!(is_registered("grep"));
         assert!(is_registered("find"));
+        assert!(is_registered("whoami"));
+        assert!(is_registered("seq"));
+        assert!(is_registered("sleep"));
+        assert!(is_registered("tail"));
         assert!(!is_registered("page"));
     }
 
@@ -56,5 +83,9 @@ mod tests {
         assert!(help_for("cat").unwrap().contains("markdown"));
         assert!(help_for("grep").unwrap().contains("pattern"));
         assert!(help_for("find").unwrap().contains("--name"));
+        assert!(help_for("whoami").unwrap().contains("identity"));
+        assert!(help_for("seq").unwrap().contains("sequence"));
+        assert!(help_for("sleep").unwrap().contains("duration"));
+        assert!(help_for("tail").unwrap().contains("last lines"));
     }
 }
