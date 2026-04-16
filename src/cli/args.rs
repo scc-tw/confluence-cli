@@ -4,13 +4,13 @@ use std::path::PathBuf;
 use crate::domain::{BodyFormat, CommentLocation, DeleteMode, PageRef};
 use crate::profile::AuthKind;
 
-const ROOT_AFTER_HELP: &str = "Quick start:\n  confluence login\n  confluence profile show\n  confluence page search \"release notes\"\n  confluence page info 12345\n  confluence page create --space-key ENG --title \"Draft\" --body \"# Hello\"\n  confluence shell\n\nDrill down:\n  confluence page --help\n  confluence page create --help\n  confluence profile --help\n  confluence shell --help";
+const ROOT_AFTER_HELP: &str = "Quick start:\n  confluence login\n  confluence profile show\n  confluence page search \"release notes\"\n  confluence page info 12345\n  confluence page create --space-key SPACE --title \"Draft\" --body \"# Hello\"\n  confluence shell\n\nDrill down:\n  confluence page --help\n  confluence page create --help\n  confluence profile --help\n  confluence shell --help";
 
-const SHELL_AFTER_HELP: &str = "Shell basics:\n  help\n  context\n  use profile work\n  use page 12345\n  use space-key ENG\n\nInside shell, keep using the same one-liner commands without the binary name:\n  page info\n  page search \"release notes\"\n  attachment list\n  property list\n  comment list\n\nType `help page` or `help page create` for command help.";
+const SHELL_AFTER_HELP: &str = "Shell basics:\n  pwd\n  ls\n  cd SPACE\n  cd ..\n  cat [target]\n  grep <pattern> [target]\n  find [target] [--name <pattern>]\n  ls SPACE | grep Guide\n  use profile work\n\nInside shell, keep using the same one-liner commands without the binary name:\n  page info\n  page read\n  page create-child --title \"Child\" --body \"# Hello\"\n  attachment list\n  property list\n  comment list\n\nType `help page` or `help page create` for command help.";
 
 const PROFILE_AFTER_HELP: &str = "Common profile flows:\n  confluence login\n  confluence profile list\n  confluence profile show\n  confluence profile use work\n  confluence profile add work --domain example.atlassian.net --auth-type bearer --api-token <token>";
 
-const PAGE_AFTER_HELP: &str = "Common page flows:\n  confluence page search \"release notes\"\n  confluence page search 'type=page and space=ENG' --cql\n  confluence page info 12345\n  confluence page read 12345 --format markdown\n  confluence page read https://your-site.atlassian.net/wiki/spaces/ENG/pages/12345/Page+Title\n  confluence page create --space-key ENG --title \"Draft\" --body \"# Hello\"\n  confluence page create-child 12345 --title \"Child\" --body \"# Hello\"\n  confluence page export 12345";
+const PAGE_AFTER_HELP: &str = "Common page flows:\n  confluence page search \"release notes\"\n  confluence page search 'type=page and space=SPACE' --cql\n  confluence page info 12345\n  confluence page read 12345 --format markdown\n  confluence page read https://your-site.atlassian.net/wiki/spaces/SPACE/pages/12345/Page+Title\n  confluence page create --space-key SPACE --title \"Draft\" --body \"# Hello\"\n  confluence page create-child 12345 --title \"Child\" --body \"# Hello\"\n  confluence page export 12345";
 
 const ATTACHMENT_AFTER_HELP: &str = "Common attachment flows:\n  confluence attachment list 12345\n  confluence attachment upload 12345 --file diagram.png\n  confluence attachment download 12345\n  confluence attachment delete 12345 diagram.png";
 
@@ -175,7 +175,7 @@ pub enum ProfileCommand {
 #[derive(Debug, Clone, Args, Default)]
 #[command(
     about = "Start an interactive Confluence shell",
-    long_about = "Start an interactive Confluence shell that keeps the same command grammar as the one-liner CLI while adding shell-local context and help.",
+    long_about = "Start an interactive Confluence shell with Unix-like navigation over spaces and pages while keeping one-liner CRUD commands available inside the shell.",
     after_help = SHELL_AFTER_HELP
 )]
 pub struct ShellCommand {}

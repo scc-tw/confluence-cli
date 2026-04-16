@@ -22,6 +22,7 @@ impl PagesApi for HttpConfluenceApi {
                 id: space.id,
                 key: space.key,
                 name: space.name,
+                homepage_id: space.homepage_id.and_then(|id| id.parse().ok()),
             })
             .collect())
     }

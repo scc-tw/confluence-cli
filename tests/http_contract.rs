@@ -171,7 +171,7 @@ fn read_page_storage_uses_v2_page_endpoint() {
             .header("authorization", "Bearer token-123");
         then.status(200).json_body(page_v2_with_body(
             855670887,
-            "ICU in Windows",
+            "Platform Notes",
             "100",
             "storage",
             "<p>Hello</p>",
@@ -182,7 +182,7 @@ fn read_page_storage_uses_v2_page_endpoint() {
     let body = api
         .read_page(
             &PageRef::Url(format!(
-                "http://{}/wiki/spaces/ENG/pages/855670887/ICU+in+Windows",
+                "http://{}/wiki/spaces/SPACE/pages/855670887/Platform+Notes",
                 server.address()
             )),
             confluence_cli::domain::BodyFormat::Storage,
@@ -201,14 +201,14 @@ fn read_page_resolves_space_overview_url_via_space_homepage() {
     let space = server.mock(|when, then| {
         when.method(GET)
             .path("/api/v2/spaces")
-            .query_param("keys", "~7120202d4ccbf388e240f58d10c28a0d13083e")
+            .query_param("keys", "~user-123")
             .query_param("limit", "1")
             .header("authorization", "Bearer token-123");
         then.status(200).json_body(json!({
             "results": [{
                 "id": "space-1",
-                "key": "~7120202d4ccbf388e240f58d10c28a0d13083e",
-                "name": "Oscar Yang",
+                "key": "~user-123",
+                "name": "User Alpha",
                 "homepageId": "855670887"
             }]
         }));
@@ -232,7 +232,7 @@ fn read_page_resolves_space_overview_url_via_space_homepage() {
     let body = api
         .read_page(
             &PageRef::Url(format!(
-                "http://{}/wiki/spaces/~7120202d4ccbf388e240f58d10c28a0d13083e/overview",
+                "http://{}/wiki/spaces/~user-123/overview",
                 server.address()
             )),
             confluence_cli::domain::BodyFormat::Storage,
@@ -252,7 +252,7 @@ fn read_page_rejects_url_from_different_domain() {
     let error = api
         .read_page(
             &PageRef::Url(
-                "https://other-site.atlassian.net/wiki/spaces/ENG/pages/855670887/ICU+in+Windows"
+                "https://other-site.atlassian.net/wiki/spaces/SPACE/pages/855670887/Platform+Notes"
                     .to_owned(),
             ),
             confluence_cli::domain::BodyFormat::Storage,
@@ -274,7 +274,7 @@ fn overview_lookup_failure_preserves_http_context() {
     let space = server.mock(|when, then| {
         when.method(GET)
             .path("/api/v2/spaces")
-            .query_param("keys", "~7120202d4ccbf388e240f58d10c28a0d13083e")
+            .query_param("keys", "~user-123")
             .query_param("limit", "1")
             .header("authorization", "Bearer token-123");
         then.status(401)
@@ -285,7 +285,7 @@ fn overview_lookup_failure_preserves_http_context() {
     let error = api
         .read_page(
             &PageRef::Url(format!(
-                "http://{}/wiki/spaces/~7120202d4ccbf388e240f58d10c28a0d13083e/overview",
+                "http://{}/wiki/spaces/~user-123/overview",
                 server.address()
             )),
             confluence_cli::domain::BodyFormat::Storage,

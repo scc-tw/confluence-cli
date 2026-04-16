@@ -6,3 +6,4 @@ pub mod ports;
 pub mod profiles;
 pub mod properties;
 pub mod runtime;
+pub mod vfs;

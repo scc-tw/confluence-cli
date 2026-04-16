@@ -24,8 +24,12 @@ pub use application::models::{
     CommentSummary, ContentProperty, CreatePageRequest, MovePageRequest, PageBody, PageSummary,
     SpaceSummary, UpdatePageRequest,
 };
+pub use application::vfs::{
+    DirEntry, NodeHandle, NodeKind, NodeStat, PageNode, SpaceNode, VirtualFileSystem,
+};
 pub use application::pages::PageExportResult;
 pub use application::runtime::{ResolveOptions, ResolvedProfile, RuntimeConfig};
+pub use support::Result;
 pub use cli::{GlobalArgs, OutputFormat};
 pub use config::ConfigSecretBackend;
 pub use infrastructure::content_io::{

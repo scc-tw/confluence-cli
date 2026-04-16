@@ -7,8 +7,10 @@ use crate::application::profiles::{
     use_profile, ProfileDraft, ProfileSecrets,
 };
 use crate::application::runtime::{ResolveOptions, ResolvedProfile, RuntimeContext};
+use crate::application::vfs::VirtualFileSystem;
 use crate::cli::args::CliAuthKind;
 use crate::config::default_config_path;
+use crate::infrastructure::vfs::ConfluenceVfs;
 use crate::infrastructure::{profile_manager, runtime_loader};
 use crate::secret::{KeyringSecretStore, SecretStore};
 use crate::support::{ConfluenceCliError, Result};
@@ -232,6 +234,13 @@ pub(super) fn load_runtime_and_api(
         .clone()
         .ok_or_else(|| ConfluenceCliError::Config(no_active_profile_message()))?;
     Ok((runtime, HttpConfluenceApi::new(http_api_config(profile))?))
+}
+
+pub(super) fn load_runtime_and_vfs(
+    global: &GlobalArgs,
+) -> Result<(RuntimeContext, Box<dyn VirtualFileSystem>)> {
+    let (runtime, api) = load_runtime_and_api(global)?;
+    Ok((runtime, Box::new(ConfluenceVfs::new(api))))
 }
 
 fn no_active_profile_message() -> String {

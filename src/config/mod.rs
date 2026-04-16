@@ -68,7 +68,6 @@ pub fn default_config_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ConfluenceCliError;
     use crate::application::runtime::ResolveOptions;
     use crate::infrastructure::profile_manager::{
         init_config, remove_profile, set_active_profile, upsert_profile,
@@ -77,6 +76,7 @@ mod tests {
         load_runtime, load_runtime_with_store, resolve_profile_state, resolve_profile_with_store,
     };
     use crate::secret::{MemorySecretStore, SecretKind, SecretStore};
+    use crate::ConfluenceCliError;
     use std::sync::{Mutex, OnceLock};
     use tempfile::tempdir;
 
@@ -146,7 +146,7 @@ mod tests {
                 "active_profile": "work",
                 "profiles": {
                     "work": {
-                        "domain": "cycraft-corp.atlassian.net",
+                        "domain": "workspace.example.atlassian.net",
                         "auth_type": "basic",
                         "email": "oscar@example.com",
                         "api_token": "token-1",
@@ -163,7 +163,7 @@ mod tests {
             .resolved_profile
             .expect("resolved profile should exist");
 
-        assert_eq!(profile.domain, "cycraft-corp.atlassian.net");
+        assert_eq!(profile.domain, "workspace.example.atlassian.net");
         assert_eq!(profile.api_path, "/wiki/rest/api");
         assert_eq!(profile.email.as_deref(), Some("oscar@example.com"));
         assert_eq!(profile.api_token.as_deref(), Some("token-1"));
@@ -189,7 +189,7 @@ mod tests {
                 "active_profile": "work",
                 "profiles": {
                     "work": {
-                        "domain": "cycraft-corp.atlassian.net",
+                        "domain": "workspace.example.atlassian.net",
                         "auth_type": "basic",
                         "email": "from-file@example.com",
                         "api_token": "token-file",
@@ -224,7 +224,7 @@ mod tests {
     fn fails_on_missing_basic_auth_secret() {
         let _lock = env_lock().lock().expect("env lock should succeed");
         let profile = Profile {
-            domain: Some("cycraft-corp.atlassian.net".to_owned()),
+            domain: Some("workspace.example.atlassian.net".to_owned()),
             auth_type: Some(AuthKind::Basic),
             email: Some("oscar@example.com".to_owned()),
             ..Profile::default()
@@ -333,7 +333,7 @@ mod tests {
                 "active_profile": "work",
                 "profiles": {
                     "work": {
-                        "domain": "cycraft-corp.atlassian.net",
+                        "domain": "workspace.example.atlassian.net",
                         "auth_type": "bearer",
                         "api_token": "token-file"
                     }
@@ -400,7 +400,7 @@ mod tests {
             "work".to_owned(),
             Profile {
                 id: Some("profile-1".to_owned()),
-                domain: Some("cycraft-corp.atlassian.net".to_owned()),
+                domain: Some("workspace.example.atlassian.net".to_owned()),
                 auth_type: Some(AuthKind::Bearer),
                 api_token: Some("token-file".to_owned()),
                 secret_backend: Some(ConfigSecretBackend::Keyring),

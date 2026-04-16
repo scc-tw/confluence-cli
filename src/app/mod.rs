@@ -19,7 +19,7 @@ mod tests {
         SpaceSummary, UpdatePageRequest,
     };
     use crate::application::runtime::{
-        ResolvedProfile, RuntimeConfig, RuntimeContext, RuntimeProfiles, ensure_writable,
+        ensure_writable, ResolvedProfile, RuntimeConfig, RuntimeContext, RuntimeProfiles,
     };
     use crate::domain::{BodyFormat, CommentLocation, DeleteMode, MoveTarget, PageId, PageRef};
     use crate::infrastructure::content_io;
@@ -43,8 +43,9 @@ mod tests {
         fn list_spaces(&self) -> Result<Vec<SpaceSummary>> {
             Ok(vec![SpaceSummary {
                 id: "100".to_owned(),
-                key: "ENG".to_owned(),
-                name: "Engineering".to_owned(),
+                key: "ALPHA".to_owned(),
+                name: "Workspace Alpha".to_owned(),
+                homepage_id: Some(1),
             }])
         }
 
@@ -419,7 +420,7 @@ mod tests {
             "New Page".to_owned(),
             "<p>Hello</p>".to_owned(),
             None,
-            Some("ENG".to_owned()),
+            Some("ALPHA".to_owned()),
             None,
         )
         .expect("page create should succeed");

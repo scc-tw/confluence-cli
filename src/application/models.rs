@@ -8,6 +8,7 @@ pub struct SpaceSummary {
     pub id: String,
     pub key: String,
     pub name: String,
+    pub homepage_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

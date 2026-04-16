@@ -251,22 +251,34 @@ If you are doing a sequence of related operations, use the shell:
 confluence shell
 ```
 
-The shell keeps the same command grammar as the normal CLI. You do **not** learn a second CRUD language.
+The shell now behaves more like a small virtual filesystem over Confluence:
+
+- `/` lists available spaces
+- `cd <space>` enters a space root
+- `cd <page>` enters a child page
+- `cd ..` goes up
+- `pwd` shows the current logical path
+- `ls` lists the current directory
+- `cat` reads page text
+- `grep` searches page text in the current subtree
+- `find` walks the current subtree
+- `|` pipes shell-native text commands together
 
 Built-ins:
 
 ```text
 help
-context
 pwd
+ls
+cd SPACE
+cd 12345
+cd ..
+cd /
+cat
+grep keyword
+find SPACE --name '*Guide'
+ls SPACE | grep Guide
 use profile work
-use page 12345
-use space-key ENG
-use space-id 100
-unset profile
-unset page
-unset space
-back
 exit
 quit
 ```
@@ -274,23 +286,25 @@ quit
 Example shell session:
 
 ```text
-confluence> use profile work
-confluence> use page 12345
-confluence> page info
-confluence> attachment list
-confluence> property list
-confluence> comment list
-confluence> back
-confluence> use space-key ENG
-confluence> page create --title "Draft" --body "# Hello"
+confluence/> ls
+confluence/> cd SPACE
+confluence/SPACE> ls
+confluence/SPACE> cd 12345
+confluence/SPACE/Project Notes> pwd
+confluence/SPACE/Project Notes> cat
+confluence/SPACE/Project Notes> grep keyword
+confluence/SPACE> find . --name '*Guide'
+confluence/SPACE> ls . | grep Guide
+confluence/SPACE> page create --title "Draft" --body "# Hello"
 ```
 
-The shell can inject missing context for common flows:
+Inside the shell, page-scoped commands still inherit the current page when that is unambiguous, and `page create` inherits the current space when you are at a space root. Explicit CLI arguments still win over shell-derived context.
 
-- after `use page 12345`, commands like `page info`, `page read`, `attachment list`, `property list`, and `comment list` can omit the page argument
-- after `use space-key ENG`, `page create` can omit `--space-key`
+Current pipe support is intentionally small and shell-native:
 
-Explicit CLI arguments still win over shell context.
+- `ls`, `cat`, `grep`, and `find` can participate in text pipelines
+- stateful builtins such as `cd`, `use profile`, and `exit` are rejected in pipelines
+- maximum pipeline depth is capped to avoid runaway recursion
 
 ## Profiles and configuration
 
