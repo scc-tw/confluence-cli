@@ -13,18 +13,25 @@ use super::{validate_same_space, HttpConfluenceApi};
 
 impl PagesApi for HttpConfluenceApi {
     fn list_spaces(&self) -> Result<Vec<SpaceSummary>> {
-        let request = self.authed(self.client.get(self.v2_url("/spaces")))?;
-        let response: SpacesResponse = request.send()?.error_for_status()?.json()?;
-        Ok(response
-            .results
-            .into_iter()
-            .map(|space| SpaceSummary {
+        let mut next_url = Some(self.v2_url("/spaces?limit=100"));
+        let mut spaces = Vec::new();
+
+        while let Some(url) = next_url.take() {
+            let request = self.authed(self.client.get(url))?;
+            let response: SpacesResponse = request.send()?.error_for_status()?.json()?;
+            spaces.extend(response.results.into_iter().map(|space| SpaceSummary {
                 id: space.id,
                 key: space.key,
                 name: space.name,
                 homepage_id: space.homepage_id.and_then(|id| id.parse().ok()),
-            })
-            .collect())
+            }));
+            next_url = response
+                .links
+                .and_then(|links| links.next)
+                .map(|next| self.absolute_url(&next));
+        }
+
+        Ok(spaces)
     }
 
     fn create_page(&self, request: CreatePageRequest) -> Result<PageSummary> {

@@ -9,6 +9,8 @@ use super::{parse_comment_location, HttpConfluenceApi};
 #[derive(Debug, Deserialize)]
 pub(super) struct SpacesResponse {
     pub(super) results: Vec<SpaceV2>,
+    #[serde(rename = "_links")]
+    pub(super) links: Option<V2Links>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -518,6 +518,69 @@ fn shell_cd_space_then_page_create_uses_space_context() {
 }
 
 #[test]
+fn shell_page_create_from_inside_page_does_not_inherit_space_context() {
+    let server = MockServer::start();
+    let dir = tempdir().expect("tempdir should be created");
+    let config_path = dir.path().join("config.json");
+    write_minimal_config(&config_path);
+
+    let spaces = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/spaces")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "100",
+                "key": "ALPHA",
+                "name": "Workspace Alpha",
+                "homepageId": "1"
+            }]
+        }));
+    });
+
+    let homepage_children = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/pages/1/children")
+            .query_param("limit", "100")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "2",
+                "status": "current",
+                "title": "People Docs",
+                "spaceId": "100",
+                "version": { "number": 1 }
+            }]
+        }));
+    });
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_confluence"));
+    configure_command(&mut command, &config_path, &server);
+    let mut child = command
+        .arg("shell")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("shell should start");
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should exist")
+        .write_all(b"cd ALPHA\ncd 2\npage create --title Draft --body '# Hello'\nexit\n")
+        .expect("shell input should be written");
+
+    let output = child
+        .wait_with_output()
+        .expect("shell output should be captured");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("page create requires either --space-id, --space-key, or --parent"));
+    spaces.assert();
+    homepage_children.assert();
+}
+
+#[test]
 fn shell_cd_reports_ambiguous_page_titles() {
     let server = MockServer::start();
     let dir = tempdir().expect("tempdir should be created");
@@ -713,7 +776,92 @@ fn shell_cat_reads_current_page_text() {
         .expect("shell output should be captured");
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("# People Docs"));
     assert!(stdout.contains("Policy guide content"));
+    spaces.assert();
+    homepage_children.assert();
+    page.assert();
+}
+
+#[test]
+fn shell_cat_raw_outputs_storage_body() {
+    let server = MockServer::start();
+    let dir = tempdir().expect("tempdir should be created");
+    let config_path = dir.path().join("config.json");
+    write_minimal_config(&config_path);
+
+    let spaces = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/spaces")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "100",
+                "key": "ALPHA",
+                "name": "Workspace Alpha",
+                "homepageId": "1"
+            }]
+        }));
+    });
+
+    let homepage_children = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/pages/1/children")
+            .query_param("limit", "100")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "2",
+                "status": "current",
+                "title": "People Docs",
+                "spaceId": "100",
+                "version": { "number": 1 }
+            }]
+        }));
+    });
+
+    let page = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/pages/2")
+            .query_param("body-format", "storage")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "id": "2",
+            "status": "current",
+            "title": "People Docs",
+            "spaceId": "100",
+            "version": { "number": 1 },
+            "body": {
+                "storage": {
+                    "value": "<h1>People Docs</h1><p>Policy guide content</p>",
+                    "representation": "storage"
+                }
+            }
+        }));
+    });
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_confluence"));
+    configure_command(&mut command, &config_path, &server);
+    let mut child = command
+        .arg("shell")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("shell should start");
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should exist")
+        .write_all(b"cd ALPHA\ncd 2\ncat --raw\nexit\n")
+        .expect("shell input should be written");
+
+    let output = child
+        .wait_with_output()
+        .expect("shell output should be captured");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("<h1>People Docs</h1><p>Policy guide content</p>"));
     spaces.assert();
     homepage_children.assert();
     page.assert();
@@ -1126,7 +1274,7 @@ fn shell_help_shows_filesystem_commands() {
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
     assert!(stdout.contains("pwd"));
     assert!(stdout.contains("ls"));
-    assert!(stdout.contains("cat [target]"));
+    assert!(stdout.contains("cat [--raw|--text|--markdown|--html] [target]"));
     assert!(stdout.contains("grep <pattern> [target]"));
     assert!(stdout.contains("find [target] [--name <pattern>]"));
     assert!(stdout.contains("cd SPACE"));

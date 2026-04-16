@@ -124,10 +124,6 @@ impl ShellState {
         self.current().as_page_ref()
     }
 
-    pub fn current_space(&self) -> Option<crate::SpaceNode> {
-        self.lineage.iter().find_map(NodeHandle::as_space).cloned()
-    }
-
     fn resolve_lineage(&self, path: &str) -> Result<Vec<NodeHandle>> {
         if path == "/" {
             return Ok(vec![self.vfs.root()]);

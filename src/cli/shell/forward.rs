@@ -47,7 +47,7 @@ fn apply_context(state: &ShellState, tokens: &mut Vec<String>) -> Result<()> {
     };
     let command = tokens.get(1).cloned();
     let current_page = state.current_page_ref();
-    let current_space = state.current_space();
+    let current_space = state.current().as_space().cloned();
 
     match (group.as_str(), command.as_deref()) {
         ("page", Some(command)) => {

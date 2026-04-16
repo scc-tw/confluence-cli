@@ -19,7 +19,11 @@ pub fn execute(
     let lineage = state.resolve_target_lineage(target.as_deref())?;
     let mut lines = Vec::new();
     walk(state, &lineage, name_filter.as_deref(), &mut lines)?;
-    Ok(CommandOutput::Text(format!("{}\n", lines.join("\n"))))
+    Ok(CommandOutput::Text(if lines.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", lines.join("\n"))
+    }))
 }
 
 fn parse_args(argv: &[String]) -> Result<(Option<String>, Option<String>)> {

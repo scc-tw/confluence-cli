@@ -122,6 +122,52 @@ fn property_response(key: &str, value: serde_json::Value, version: u32) -> serde
 }
 
 #[test]
+fn list_spaces_follows_pagination_links() {
+    let server = MockServer::start();
+
+    let first = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/spaces")
+            .query_param("limit", "100")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "100",
+                "key": "ALPHA",
+                "name": "Workspace Alpha",
+                "homepageId": "1"
+            }],
+            "_links": { "next": "/api/v2/spaces?cursor=next-page" }
+        }));
+    });
+
+    let second = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/spaces")
+            .query_param("cursor", "next-page")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "101",
+                "key": "BETA",
+                "name": "Workspace Beta",
+                "homepageId": "2"
+            }],
+            "_links": {}
+        }));
+    });
+
+    let api = HttpConfluenceApi::new(test_profile(&server)).expect("api should initialize");
+    let spaces = api.list_spaces().expect("space listing should paginate");
+
+    first.assert();
+    second.assert();
+    assert_eq!(spaces.len(), 2);
+    assert_eq!(spaces[0].key, "ALPHA");
+    assert_eq!(spaces[1].key, "BETA");
+}
+
+#[test]
 fn search_pages_cql_follows_next_links() {
     let server = MockServer::start();
 

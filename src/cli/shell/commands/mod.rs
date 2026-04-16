@@ -14,7 +14,7 @@ pub fn is_registered(name: &str) -> bool {
 pub fn help_for(name: &str) -> Option<&'static str> {
     match name {
         "cat" => Some(
-            "cat [target]\n  Read a page as shell text. Without a target, reads the current page or piped input.",
+            "cat [--raw|--text|--markdown|--html] [target]\n  Read page content. Without a target, reads the current page or piped input. Default output is markdown.",
         ),
         "grep" => Some(
             "grep <pattern> [target]\n  Search shell text input or recursively search page text under the target subtree.",

@@ -6,7 +6,7 @@ use crate::profile::AuthKind;
 
 const ROOT_AFTER_HELP: &str = "Quick start:\n  confluence login\n  confluence profile show\n  confluence page search \"release notes\"\n  confluence page info 12345\n  confluence page create --space-key SPACE --title \"Draft\" --body \"# Hello\"\n  confluence shell\n\nDrill down:\n  confluence page --help\n  confluence page create --help\n  confluence profile --help\n  confluence shell --help";
 
-const SHELL_AFTER_HELP: &str = "Shell basics:\n  pwd\n  ls\n  cd SPACE\n  cd ..\n  cat [target]\n  grep <pattern> [target]\n  find [target] [--name <pattern>]\n  ls SPACE | grep Guide\n  use profile work\n\nInside shell, keep using the same one-liner commands without the binary name:\n  page info\n  page read\n  page create-child --title \"Child\" --body \"# Hello\"\n  attachment list\n  property list\n  comment list\n\nType `help page` or `help page create` for command help.";
+const SHELL_AFTER_HELP: &str = "Shell basics:\n  pwd\n  ls\n  cd SPACE\n  cd ..\n  cat [--raw|--text|--markdown|--html] [target]\n  grep <pattern> [target]\n  find [target] [--name <pattern>]\n  ls SPACE | grep Guide\n  use profile work\n\nInside shell, keep using the same one-liner commands without the binary name:\n  page info\n  page read\n  page create-child --title \"Child\" --body \"# Hello\"\n  attachment list\n  property list\n  comment list\n\nType `help page` or `help page create` for command help.";
 
 const PROFILE_AFTER_HELP: &str = "Common profile flows:\n  confluence login\n  confluence profile list\n  confluence profile show\n  confluence profile use work\n  confluence profile add work --domain example.atlassian.net --auth-type bearer --api-token <token>";
 

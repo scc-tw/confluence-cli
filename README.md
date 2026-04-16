@@ -259,7 +259,7 @@ The shell now behaves more like a small virtual filesystem over Confluence:
 - `cd ..` goes up
 - `pwd` shows the current logical path
 - `ls` lists the current directory
-- `cat` reads page text
+- `cat` reads page content (default: markdown)
 - `grep` searches page text in the current subtree
 - `find` walks the current subtree
 - `|` pipes shell-native text commands together
@@ -274,7 +274,7 @@ cd SPACE
 cd 12345
 cd ..
 cd /
-cat
+cat [--raw|--text|--markdown|--html] [target]
 grep keyword
 find SPACE --name '*Guide'
 ls SPACE | grep Guide
@@ -292,6 +292,7 @@ confluence/SPACE> ls
 confluence/SPACE> cd 12345
 confluence/SPACE/Project Notes> pwd
 confluence/SPACE/Project Notes> cat
+confluence/SPACE/Project Notes> cat --raw
 confluence/SPACE/Project Notes> grep keyword
 confluence/SPACE> find . --name '*Guide'
 confluence/SPACE> ls . | grep Guide
@@ -305,6 +306,7 @@ Current pipe support is intentionally small and shell-native:
 - `ls`, `cat`, `grep`, and `find` can participate in text pipelines
 - stateful builtins such as `cd`, `use profile`, and `exit` are rejected in pipelines
 - maximum pipeline depth is capped to avoid runaway recursion
+- if a page title contains `/`, use the numeric page id instead of the title path
 
 ## Profiles and configuration
 
