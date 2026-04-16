@@ -1,77 +1,325 @@
 # confluence-cli
 
-Rust rewrite of the Confluence CLI.
+`confluence` is a command-line tool for reading, searching, and updating Confluence from pure CLI workflows.
 
-## Goals
+It supports two styles of use:
 
-- Match the practical feature surface of the existing JavaScript `confluence-cli`
-- Redesign the product instead of porting technical debt
-- Make `patch` a first-class workflow
-- Prefer `archive` over destructive deletion
-- Invest in Markdown round-trip quality through a canonical internal document model
-- Treat inline comments and move semantics as explicit design areas, not incidental side effects
+- **one-liner commands** for direct CRUD/query work
+- **`confluence shell`** for an interactive, context-aware workflow that feels closer to a db shell or debugger prompt
 
-## Design direction
+## What it is good at
 
-- Rust 2024 edition
-- Rust 1.94 minimum
-- Version starts at `0.1.0`
-- Breaking changes are allowed until `1.0.0`
-- REST v2 first, with selective v1 fallback where Cloud APIs still require it
+- searching pages with plain text or raw CQL
+- reading pages by id or common Confluence URLs
+- creating, updating, exporting, patching, moving, archiving, and deleting pages
+- listing, uploading, downloading, and deleting attachments
+- listing, reading, setting, and deleting content properties
+- listing, creating, replying to, resolving, reopening, and deleting comments
+- converting Confluence content locally between markdown, storage, html, and text
 
-## Current command surface
+## Build and run
 
 ```text
-confluence config init
-confluence profile list|use|add|remove
-confluence page read|info|find|search|children|create|create-child|update|patch|move|archive|delete|export
-confluence attachment list|download|upload|delete
-confluence property list|get|set|delete
-confluence comment list|info|create|reply|resolve|reopen|delete
-confluence convert
+cargo build
+cargo run -- --help
 ```
 
-## Current implementation status
-
-The project is no longer a skeleton. It currently includes:
-
-- CLI command tree with human and JSON output modes
-- config persistence plus profile CRUD
-- environment override support
-- read-only profile enforcement for mutating commands
-- page read/info/search/create/create-child/update/patch/move/archive/delete/export workflows
-- attachment list/download/upload/delete workflows
-- property list/get/set/delete workflows
-- comment list/info/create/reply/resolve/reopen workflows
-- local Markdown/storage/text conversion
-- managed export bundle metadata
-- local unified-diff patch application
-
-## Current constraints
-
-The rewrite is usable, but some areas are intentionally conservative:
-
-- `page patch` is a local diff workflow followed by a guarded full-page update; the base file must exactly match the current remote storage body
-- `page move --before/--after` is guarded and refuses top-level targets
-- `page move --before/--after --title` is not implemented yet
-- inline comments require explicit inline properties; the CLI does not try to infer editor selection metadata
-- inline create/reply remain guarded even though inline info/resolve/reopen are richer now
-- raw CQL search is supported, but advanced transport coverage is still improving
-- new profile writes prefer OS keyring-backed secrets, while legacy plaintext secrets are migrated when possible
-
-## Configuration
-
-Default config path on Windows:
+Compiled binary:
 
 ```text
-%USERPROFILE%\.config\confluence-cli\config.json
+target\debug\confluence --help
 ```
 
-If `USERPROFILE` is unavailable, the CLI falls back to `./config.json`.
+## Start here
 
-### Environment variables
+### 1. Log in
 
-Supported runtime overrides:
+Interactive login is the fastest way to get started:
+
+```text
+confluence login
+```
+
+That flow creates or updates a profile, stores secrets through the existing secret backend, and makes the profile active.
+
+If you want the lower-level flow instead, you can still initialize config directly:
+
+```text
+confluence config init --domain example.atlassian.net --auth-type bearer --api-token <token>
+```
+
+### 2. Inspect the active profile
+
+```text
+confluence profile show
+confluence profile list
+confluence profile use work
+```
+
+### 3. Learn the command tree
+
+Top-level help:
+
+```text
+confluence --help
+```
+
+Drill down by group:
+
+```text
+confluence page --help
+confluence attachment --help
+confluence property --help
+confluence comment --help
+confluence shell --help
+```
+
+Then drill down again when needed:
+
+```text
+confluence page create --help
+confluence page delete --help
+confluence comment reply --help
+```
+
+## Common one-liners
+
+### Read and search
+
+Search by text:
+
+```text
+confluence page search "release notes"
+```
+
+Search with raw CQL:
+
+```text
+confluence page search "type=page and space=ENG" --cql
+```
+
+Read a page by id:
+
+```text
+confluence page read 12345
+```
+
+Read a page by Confluence URL:
+
+```text
+confluence page read https://your-site.atlassian.net/wiki/spaces/ENG/pages/12345/Page+Title
+confluence page read https://your-site.atlassian.net/wiki/pages/viewpage.action?pageId=12345
+```
+
+Read a space overview URL by resolving the space home page:
+
+```text
+confluence page read https://your-site.atlassian.net/wiki/spaces/SPACEKEY/overview
+```
+
+Read as markdown:
+
+```text
+confluence page read 12345 --format markdown
+```
+
+Show page metadata:
+
+```text
+confluence page info 12345
+```
+
+### Create and update pages
+
+Create a page in a space:
+
+```text
+confluence page create --space-key ENG --title "Draft" --body "# Hello"
+```
+
+Create from file:
+
+```text
+confluence page create --space-key ENG --title "Draft" --body-file .\page.md
+```
+
+Create a child page:
+
+```text
+confluence page create-child 12345 --title "Child" --body "# Child"
+```
+
+Update with explicit storage body and version:
+
+```text
+confluence page update 12345 --title "Design Doc" --storage-body "<p>Hello</p>" --version 7
+```
+
+Patch from a local base file plus unified diff:
+
+```text
+confluence page patch 12345 --base-file .\page.storage --patch-file .\page.diff
+```
+
+Preview a patch without writing:
+
+```text
+confluence page patch 12345 --base-file .\page.storage --patch-file .\page.diff --dry-run
+```
+
+### Move, archive, and delete
+
+Move under a new parent:
+
+```text
+confluence page move 12345 --to-parent 67890
+```
+
+Archive:
+
+```text
+confluence page archive 12345
+```
+
+Delete to trash:
+
+```text
+confluence page delete 12345 --mode trash
+```
+
+Purge permanently:
+
+```text
+confluence page delete 12345 --mode purge --yes-im-sure
+```
+
+### Export and convert
+
+Export a page bundle as markdown:
+
+```text
+confluence page export 12345 --dest .\exports\design --format markdown
+```
+
+Export without attachments:
+
+```text
+confluence page export 12345 --dest .\exports\design --skip-attachments
+```
+
+Convert locally:
+
+```text
+confluence convert --from markdown --to storage --input-file .\page.md
+confluence convert --from storage --to markdown --input "<p>Hello</p>"
+```
+
+### Attachments
+
+```text
+confluence attachment list 12345
+confluence attachment upload 12345 --file .\diagram.png
+confluence attachment download 12345
+confluence attachment delete 12345 diagram.png
+```
+
+### Properties
+
+```text
+confluence property list 12345
+confluence property get 12345 owner
+confluence property set 12345 owner --value '{"team":"eng"}'
+confluence property delete 12345 owner
+```
+
+### Comments
+
+```text
+confluence comment list 12345
+confluence comment create 12345 --body "Looks good"
+confluence comment reply 12345 c-1 --body "Ack"
+confluence comment resolve c-1
+confluence comment reopen c-1
+confluence comment delete c-1
+```
+
+## Interactive shell
+
+If you are doing a sequence of related operations, use the shell:
+
+```text
+confluence shell
+```
+
+The shell keeps the same command grammar as the normal CLI. You do **not** learn a second CRUD language.
+
+Built-ins:
+
+```text
+help
+context
+pwd
+use profile work
+use page 12345
+use space-key ENG
+use space-id 100
+unset profile
+unset page
+unset space
+back
+exit
+quit
+```
+
+Example shell session:
+
+```text
+confluence> use profile work
+confluence> use page 12345
+confluence> page info
+confluence> attachment list
+confluence> property list
+confluence> comment list
+confluence> back
+confluence> use space-key ENG
+confluence> page create --title "Draft" --body "# Hello"
+```
+
+The shell can inject missing context for common flows:
+
+- after `use page 12345`, commands like `page info`, `page read`, `attachment list`, `property list`, and `comment list` can omit the page argument
+- after `use space-key ENG`, `page create` can omit `--space-key`
+
+Explicit CLI arguments still win over shell context.
+
+## Profiles and configuration
+
+Useful profile commands:
+
+```text
+confluence profile list
+confluence profile show
+confluence profile add work --domain example.atlassian.net --auth-type bearer --api-token <token>
+confluence profile use work
+confluence profile remove work
+```
+
+Global flags:
+
+- `--config-path <PATH>` select a config file
+- `--profile <NAME>` select a profile for one invocation
+- `--output <human|json>` switch output format
+
+Resolution order:
+
+1. `--config-path`
+2. `--profile`
+3. `CONFLUENCE_PROFILE`
+4. active profile in config
+5. environment overrides for the selected profile
+6. built-in defaults
+
+Supported environment overrides:
 
 - `CONFLUENCE_PROFILE`
 - `CONFLUENCE_DOMAIN`
@@ -84,102 +332,45 @@ Supported runtime overrides:
 - `CONFLUENCE_PASSWORD`
 - `CONFLUENCE_READ_ONLY`
 
-### Precedence
+Defaults:
 
-Resolution order is:
+- `protocol`: `https`
+- `api_path`: `/wiki/rest/api` for `*.atlassian.net`, otherwise `/rest/api`
+- `auth_type`: `basic`
+- `read_only`: `false`
 
-1. explicit CLI flags such as `--config-path` and `--profile`
-2. environment variables
-3. selected profile from `config.json`
-4. active profile from `config.json`
-5. built-in defaults
+Auth modes:
 
-### Auth expectations
+- `basic` needs email/username plus api token/password
+- `bearer` needs api token
+- `mtls` parses as config but HTTP client setup is not implemented yet
 
-- `basic` auth requires identity plus secret:
-  - `email` or `username`
-  - `api_token` or `password`
-- `bearer` auth requires `api_token`
-- `mtls` is not implemented yet
+## Output modes
 
-### Secret handling
+Human output is the default.
 
-- environment variables still take precedence for CI and automation
-- new profile writes store metadata in `config.json` and secrets in the OS keyring
-- legacy plaintext `api_token` / `password` values are still read for compatibility and migrated when possible
-
-## Export behavior
-
-`page export` currently writes a managed bundle:
-
-- content file in the requested format, such as `page.md`
-- `.confluence/page.json` metadata
-- optional `attachments/` directory when attachments are included
-
-Supported export formats today:
-
-- `markdown`
-- `storage`
-- `html`
-- `text`
-
-Use `--skip-attachments` to avoid attachment download requests.
-
-## Examples
+Machine-readable output:
 
 ```text
-confluence config init --name work --domain your-domain.atlassian.net --auth-type bearer --api-token <token>
-confluence profile add staging --domain staging.atlassian.net --auth-type bearer --api-token <token>
-confluence page create --title "Design Doc" --body-file .\page.md --space-key ENG
-confluence page export 123 --dest .\exports\design --format markdown
-confluence attachment upload 123 --file .\spec.md --comment "refresh"
-confluence property set 123 "release notes" --value-file .\release-notes.json
-confluence comment info c-1
-confluence comment resolve c-1
-confluence comment reopen c-1
+confluence --output json profile show
+confluence --output json page info 12345
 ```
 
-## Testing and verification
+## Safety and guardrails
 
-The project currently verifies with:
+- read-only profiles block mutating commands before any write request is sent
+- `page delete --mode purge` requires `--yes-im-sure`
+- `page patch` only writes when the base file matches the current remote storage body exactly
+- inline comment create/reply with `--location inline` requires explicit inline metadata
+- moving across spaces is rejected
+- renaming during `page move --before` or `--after` is not implemented
+- mTLS transport is not implemented yet
 
-- `cargo fmt --check`
-- `cargo clippy --all-targets -- -D warnings`
-- `cargo test`
-- `cargo build`
+## Verification
 
-Coverage includes:
+```text
+cargo test
+cargo build
+```
 
-- CLI parsing tests
-- config/profile persistence tests
-- domain parsing tests
-- app-layer workflow validation tests
-- conversion and patch tests
-- API helper tests
-- HTTP contract tests for pagination, richer comment flows, attachment/property/export transport, and move guard behavior
-
-Current HTTP contract coverage includes:
-
-- raw CQL pagination
-- page move guards and parent move transport
-- comment reply payloads and delete/list routes
-- comment info transport
-- inline comment resolve/reopen transport
-- attachment list/download/upload/delete routes
-- property list/get/set/delete routes
-- export transport flow
-- CLI smoke coverage for `--config-path`, `--profile`, and read-only mutation blocking
-
-Current testing limits:
-
-- attachment/property/export coverage is transport-focused, not full live-cloud integration
-- CLI integration coverage is smoke-level, not exhaustive output snapshot coverage
-- inline comment metadata is still treated as explicit caller input rather than inferred editor state for create/reply
-
-## Next high-value work
-
-- expand HTTP fixture coverage for create, export, attachments, and properties
-- paginate raw CQL searches across larger result sets
-- deepen move and comment contract coverage
-- improve README / examples / migration guidance
-- tenant-validate broader inline metadata handling before unguarding inline create/reply
+The current test suite covers profile/bootstrap behavior, HTTP contracts, one-liner page URL reads, and shell flows through the real binary.
