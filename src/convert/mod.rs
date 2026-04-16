@@ -22,7 +22,7 @@ pub enum Block {
         content: Vec<Inline>,
     },
     Paragraph(Vec<Inline>),
-    CodeBlock {
+    CodeFence {
         language: Option<String>,
         code: String,
     },
@@ -76,6 +76,7 @@ pub fn apply_unified_patch(base: &str, patch_text: &str) -> Result<String> {
         .map_err(|error| ConfluenceCliError::Config(format!("patch failed: {error}")))
 }
 
+#[cfg(test)]
 pub fn export_managed_bundle(
     directory: &Path,
     metadata: &ManagedBundleMetadata,
@@ -158,7 +159,7 @@ pub fn markdown_to_document(input: &str) -> Document {
                 code.push_str(code_line);
             }
 
-            blocks.push(Block::CodeBlock { language, code });
+            blocks.push(Block::CodeFence { language, code });
             continue;
         }
 
@@ -297,7 +298,7 @@ pub fn document_to_markdown(document: &Document) -> String {
                 ));
             }
             Block::Paragraph(content) => output.push(inline_to_markdown(content)),
-            Block::CodeBlock { language, code } => {
+            Block::CodeFence { language, code } => {
                 let mut block_output = String::from("```");
                 if let Some(language) = language {
                     block_output.push_str(language);
@@ -360,7 +361,7 @@ pub fn storage_to_document(input: &str) -> Result<Document> {
                         });
                     }
                     "pre" => {
-                        blocks.push(Block::CodeBlock {
+                        blocks.push(Block::CodeFence {
                             language: None,
                             code: inline_to_text(&read_inline_storage(
                                 &mut reader,
@@ -496,7 +497,7 @@ pub fn document_to_storage(document: &Document) -> String {
             Block::Paragraph(content) => {
                 output.push_str(&format!("<p>{}</p>", inline_to_storage(content)));
             }
-            Block::CodeBlock { code, .. } => {
+            Block::CodeFence { code, .. } => {
                 output.push_str(&format!("<pre><code>{}</code></pre>", escape_html(code)));
             }
             Block::BulletList(items) => {
@@ -539,7 +540,7 @@ pub fn document_to_text(document: &Document) -> String {
             Block::Heading { content, .. } | Block::Paragraph(content) => {
                 output.push(inline_to_text(content));
             }
-            Block::CodeBlock { code, .. } => output.push(code.clone()),
+            Block::CodeFence { code, .. } => output.push(code.clone()),
             Block::BulletList(items) => {
                 output.extend(
                     items
