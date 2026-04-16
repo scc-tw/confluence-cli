@@ -1,5 +1,6 @@
 use serde::Serialize;
 
+use crate::application::models::PageContentKind;
 use crate::domain::{PageId, PageRef};
 use crate::support::Result;
 
@@ -16,6 +17,7 @@ pub struct PageNode {
     pub id: u64,
     pub title: String,
     pub space_id: Option<String>,
+    pub content_kind: PageContentKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -30,6 +32,7 @@ pub enum NodeKind {
     Root,
     Space,
     Page,
+    Folder,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

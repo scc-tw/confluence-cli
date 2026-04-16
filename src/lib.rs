@@ -21,8 +21,8 @@ pub use app::{
 };
 pub use application::models::{
     ArchiveResult, AttachmentSummary, AttachmentUploadRequest, CommentCreateRequest,
-    CommentSummary, ContentProperty, CreatePageRequest, MovePageRequest, PageBody, PageSummary,
-    SpaceSummary, UpdatePageRequest,
+    CommentSummary, ContentProperty, CreatePageRequest, MovePageRequest, PageBody,
+    PageContentKind, PageSummary, SpaceSummary, UpdatePageRequest,
 };
 pub use application::vfs::{
     DirEntry, NodeCapability, NodeHandle, NodeKind, NodeStat, PageNode, SpaceNode,

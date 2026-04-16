@@ -12,12 +12,27 @@ pub struct SpaceSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PageContentKind {
+    Page,
+    Folder,
+}
+
+impl Default for PageContentKind {
+    fn default() -> Self {
+        Self::Page
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PageSummary {
     pub id: u64,
     pub title: String,
     pub status: Option<String>,
     pub space_id: Option<String>,
     pub version: Option<u32>,
+    #[serde(default)]
+    pub content_kind: PageContentKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
