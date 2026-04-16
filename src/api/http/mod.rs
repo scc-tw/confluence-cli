@@ -256,7 +256,7 @@ fn extract_page_id_from_url(url: &str) -> Option<PageId> {
 
     let segments: Vec<_> = parsed.path_segments()?.collect();
     for window in segments.windows(2) {
-        if window[0] == "pages" {
+        if window[0] == "pages" || window[0] == "folder" {
             if let Ok(page_id) = window[1].parse::<u64>() {
                 return Some(PageId::new(page_id));
             }
@@ -300,6 +300,16 @@ mod tests {
         .expect("page id should be extracted");
 
         assert_eq!(page_id.get(), 99887);
+    }
+
+    #[test]
+    fn extracts_page_id_from_folder_url() {
+        let page_id = extract_page_id_from_url(
+            "https://example.atlassian.net/wiki/spaces/SPACE/folder/950304787",
+        )
+        .expect("folder id should be extracted");
+
+        assert_eq!(page_id.get(), 950304787);
     }
 
     #[test]

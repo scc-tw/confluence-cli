@@ -1,7 +1,9 @@
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::application::models::{AttachmentSummary, CommentSummary, ContentProperty, PageSummary};
+use crate::application::models::{
+    AttachmentSummary, CommentSummary, ContentProperty, PageContentKind, PageSummary,
+};
 use crate::domain::CommentLocation;
 
 use super::{parse_comment_location, HttpConfluenceApi};
@@ -27,6 +29,8 @@ pub(super) struct PageV2 {
     pub(super) id: String,
     pub(super) title: String,
     pub(super) status: Option<String>,
+    #[serde(rename = "type", default)]
+    pub(super) content_kind: PageContentKind,
     #[serde(rename = "spaceId")]
     pub(super) space_id: Option<String>,
     pub(super) body: Option<PageBodyContainer>,
@@ -53,6 +57,7 @@ impl PageV2 {
             status: self.status,
             space_id: self.space_id,
             version: self.version.map(|version| version.number),
+            content_kind: self.content_kind,
         }
     }
 
@@ -73,6 +78,8 @@ pub(super) struct PageV1 {
     pub(super) id: String,
     pub(super) title: String,
     pub(super) status: Option<String>,
+    #[serde(rename = "type", default)]
+    pub(super) content_kind: PageContentKind,
     pub(super) version: Option<PageVersion>,
     pub(super) space: Option<PageSpace>,
     pub(super) body: Option<PageBodyContainer>,
@@ -88,6 +95,7 @@ impl PageV1 {
             status: self.status,
             space_id: self.space.map(|space| space.id),
             version: self.version.map(|version| version.number),
+            content_kind: self.content_kind,
         }
     }
 

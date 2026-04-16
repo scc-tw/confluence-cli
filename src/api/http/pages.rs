@@ -58,7 +58,8 @@ impl PagesApi for HttpConfluenceApi {
 
     fn list_child_pages(&self, page: &PageRef) -> Result<Vec<PageSummary>> {
         let page_id = self.resolve_page_id(page)?;
-        let mut next_url = Some(self.v2_url(&format!("/pages/{page_id}/children?limit=100")));
+        let mut next_url =
+            Some(self.v2_url(&format!("/pages/{page_id}/direct-children?limit=100")));
         let mut children = Vec::new();
 
         while let Some(url) = next_url.take() {
