@@ -1,12 +1,12 @@
 use confluence_cli::AuthKind;
 use confluence_cli::ConfluenceCliError;
-use confluence_cli::api::{
-    AttachmentsApi, CommentsApi, HttpApiConfig, HttpConfluenceApi, PagesApi, PropertiesApi,
-};
-use confluence_cli::app::{self, PageExportResult};
 use confluence_cli::domain::{CommentLocation, MoveTarget, PageId, PageRef};
 use confluence_cli::run_from;
 use confluence_cli::{AttachmentUploadRequest, CommentCreateRequest, MovePageRequest};
+use confluence_cli::{
+    AttachmentsApi, CommentsApi, HttpApiConfig, HttpConfluenceApi, PageExportResult, PagesApi,
+    PropertiesApi,
+};
 use httpmock::Method::{DELETE, GET, POST, PUT};
 use httpmock::{Mock, MockServer};
 use serde_json::json;
@@ -522,7 +522,7 @@ fn page_export_uses_page_info_body_and_attachment_requests() {
     });
 
     let api = HttpConfluenceApi::new(test_profile(&server)).expect("api should initialize");
-    let result: PageExportResult = app::page_export(
+    let result: PageExportResult = confluence_cli::export_page_to_dir(
         &api,
         &PageRef::Id(PageId::new(123)),
         dir.path(),

@@ -1,66 +1,26 @@
-use crate::application::runtime::{
-    ResolveOptions, ResolvedProfile, RuntimeConfig, RuntimeContext, RuntimeProfiles,
-};
-use crate::config::{ConfigFile, ConfigSecretBackend, Profile, ensure_profile_id};
+use crate::application::runtime::{ResolveOptions, ResolvedProfile};
+use crate::config::{ConfigFile, ConfigSecretBackend, Profile};
 use crate::profile::AuthKind;
-use crate::secret::{KeyringSecretStore, SecretStore};
-use crate::secret::{SecretBackend, SecretKind};
+use crate::secret::SecretKind;
+use crate::secret::SecretStore;
 use crate::support::{ConfluenceCliError, Result};
 
-pub fn load_runtime_context(options: &ResolveOptions) -> Result<RuntimeContext> {
-    let store = KeyringSecretStore;
-    load_runtime_context_with_store(options, &store)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeConfigState {
+    pub config_path: std::path::PathBuf,
+    pub config: ConfigFile,
+    pub resolved_profile: Option<ResolvedProfile>,
+    pub migration: Option<ConfigMigration>,
 }
 
-pub fn load_runtime_context_with_store(
-    options: &ResolveOptions,
-    secret_store: &dyn SecretStore,
-) -> Result<RuntimeContext> {
-    Ok(RuntimeContext {
-        runtime_config: load_runtime_with_store(options, Some(secret_store))?,
-    })
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ConfigMigration {
+    pub updated_profiles: Vec<(String, Profile)>,
 }
 
-#[cfg(test)]
-pub fn load_runtime(options: &ResolveOptions) -> Result<RuntimeConfig> {
-    load_runtime_with_store(options, None)
-}
-
-pub fn load_runtime_with_store(
-    options: &ResolveOptions,
-    secret_store: Option<&dyn SecretStore>,
-) -> Result<RuntimeConfig> {
-    let path = options
-        .config_path
-        .clone()
-        .unwrap_or_else(crate::config::default_config_path);
-
-    let config = crate::config::load_config(&path)?;
-    let state = resolve_runtime_state(path.clone(), config, options, secret_store)?;
-    if let Some(migration) = &state.migration
-        && !migration.is_empty()
-    {
-        crate::config::save_config(&path, &state.config)?;
-    }
-
-    Ok(into_runtime_config(state))
-}
-
-pub fn into_runtime_config(state: RuntimeConfigState) -> RuntimeConfig {
-    RuntimeConfig {
-        profiles: RuntimeProfiles {
-            active_profile: state.config.active_profile,
-            profiles: state.config.profiles.keys().cloned().collect(),
-        },
-        resolved_profile: state.resolved_profile,
-    }
-}
-
-impl From<ConfigSecretBackend> for SecretBackend {
-    fn from(value: ConfigSecretBackend) -> Self {
-        match value {
-            ConfigSecretBackend::Keyring => SecretBackend::Keyring,
-        }
+impl ConfigMigration {
+    pub fn is_empty(&self) -> bool {
+        self.updated_profiles.is_empty()
     }
 }
 
@@ -233,7 +193,6 @@ pub fn resolve_profile_state(
             api_token,
             password,
             read_only,
-            secret_backend: profile.secret_backend.clone().map(Into::into),
         },
         migrated_profile,
     ))
@@ -331,21 +290,10 @@ fn resolve_secret(
 
     Ok((None, false))
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeConfigState {
-    pub config_path: std::path::PathBuf,
-    pub config: ConfigFile,
-    pub resolved_profile: Option<ResolvedProfile>,
-    pub migration: Option<ConfigMigration>,
-}
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ConfigMigration {
-    pub updated_profiles: Vec<(String, Profile)>,
-}
-
-impl ConfigMigration {
-    pub fn is_empty(&self) -> bool {
-        self.updated_profiles.is_empty()
+fn ensure_profile_id(mut profile: Profile) -> Profile {
+    if profile.id.is_none() {
+        profile.id = Some(uuid::Uuid::new_v4().to_string());
     }
+    profile
 }

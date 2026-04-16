@@ -8,6 +8,9 @@ use crate::application::models::{
 use crate::domain::{BodyFormat, CommentLocation, DeleteMode, PageRef};
 use crate::support::Result;
 
+use super::profiles::{ProfileDraft, ProfileSecrets};
+use super::runtime::RuntimeConfig;
+
 pub trait PagesApi {
     fn list_spaces(&self) -> Result<Vec<SpaceSummary>>;
     fn create_page(&self, request: CreatePageRequest) -> Result<PageSummary>;
@@ -51,4 +54,27 @@ pub trait CommentsApi {
         resolved: bool,
     ) -> Result<CommentSummary>;
     fn delete_comment(&self, comment_id: &str) -> Result<()>;
+}
+
+pub trait ProfilesStore {
+    fn init_profile(
+        &self,
+        name: &str,
+        draft: ProfileDraft,
+        secrets: &ProfileSecrets,
+    ) -> Result<RuntimeConfig>;
+
+    fn add_or_update_profile(
+        &self,
+        name: &str,
+        draft: ProfileDraft,
+        secrets: &ProfileSecrets,
+        activate: bool,
+    ) -> Result<RuntimeConfig>;
+
+    fn use_profile(&self, name: &str) -> Result<RuntimeConfig>;
+
+    fn remove_profile(&self, name: &str) -> Result<RuntimeConfig>;
+
+    fn list_profiles(&self) -> Result<RuntimeConfig>;
 }

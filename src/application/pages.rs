@@ -1,8 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use crate::convert::{
-    apply_unified_patch, build_bundle_metadata, convert_text, export_bundle_file,
-};
+use crate::convert::apply_unified_patch;
 use crate::domain::{BodyFormat, DeleteMode, MoveTarget, PageId, PageRef};
 use crate::support::{ConfluenceCliError, Result};
 
@@ -10,9 +8,7 @@ use super::models::{
     ArchiveResult, CreatePageRequest, MovePageRequest, PageBody, PageSummary, SpaceSummary,
     UpdatePageRequest,
 };
-use super::ports::{AttachmentsApi, PagesApi};
-
-use super::attachments::attachment_download_all;
+use super::ports::PagesApi;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct PageExportResult {
@@ -195,49 +191,5 @@ pub fn page_move<A: PagesApi>(
         page: page.clone(),
         target,
         title,
-    })
-}
-
-pub fn page_export<A: PagesApi + AttachmentsApi>(
-    api: &A,
-    page: &PageRef,
-    directory: &Path,
-    format: BodyFormat,
-    include_attachments: bool,
-) -> Result<PageExportResult> {
-    let summary = api.get_page_info(page)?;
-    let storage = api.read_page(page, BodyFormat::Storage)?;
-    let (file_name, content) = match format {
-        BodyFormat::Markdown => (
-            "page.md",
-            convert_text(&storage.content, BodyFormat::Storage, BodyFormat::Markdown)?,
-        ),
-        BodyFormat::Storage => ("page.storage", storage.content.clone()),
-        BodyFormat::Text => (
-            "page.txt",
-            convert_text(&storage.content, BodyFormat::Storage, BodyFormat::Text)?,
-        ),
-        BodyFormat::Html => ("page.html", api.read_page(page, BodyFormat::Html)?.content),
-    };
-
-    let metadata = build_bundle_metadata(
-        Some(summary.id),
-        Some(summary.title.clone()),
-        summary.version,
-        &storage.content,
-    );
-    export_bundle_file(directory, &metadata, file_name, &content)?;
-
-    let attachment_count = if include_attachments {
-        let attachments_dir = directory.join("attachments");
-        attachment_download_all(api, page, &attachments_dir)?.len()
-    } else {
-        0
-    };
-
-    Ok(PageExportResult {
-        directory: directory.to_path_buf(),
-        content_path: directory.join(file_name),
-        attachment_count,
     })
 }

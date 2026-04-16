@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use crate::secret::SecretBackend;
 use crate::support::{ConfluenceCliError, Result};
 
 #[derive(Debug, Clone)]
@@ -21,7 +20,6 @@ pub struct ResolvedProfile {
     pub api_token: Option<String>,
     pub password: Option<String>,
     pub read_only: bool,
-    pub secret_backend: Option<SecretBackend>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

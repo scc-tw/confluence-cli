@@ -8,12 +8,6 @@ use crate::support::{ConfluenceCliError, Result};
 
 const SERVICE_NAME: &str = "confluence-cli";
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SecretBackend {
-    Keyring,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SecretKind {
     ApiToken,

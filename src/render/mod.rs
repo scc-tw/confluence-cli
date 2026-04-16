@@ -5,7 +5,7 @@ use crate::application::pages::PageExportResult;
 use crate::application::runtime::RuntimeConfig;
 use crate::support::Result;
 
-pub fn render_json<T: Serialize>(value: &T) -> Result<String> {
+pub fn render_json<T: Serialize + ?Sized>(value: &T) -> Result<String> {
     Ok(serde_json::to_string_pretty(value)?)
 }
 

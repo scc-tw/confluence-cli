@@ -35,7 +35,7 @@ pub(super) fn print_profiles_json(runtime: &RuntimeConfig) -> Result<()> {
 
 pub(super) fn print_json_or_human<T, F>(output: OutputFormat, value: &T, human: F) -> Result<()>
 where
-    T: Serialize,
+    T: Serialize + ?Sized,
     F: FnOnce(&T),
 {
     match output {
@@ -59,10 +59,6 @@ pub(super) fn print_page_action(label: &str, summary: &PageSummary) {
 
 pub(super) fn print_archive_task(task_id: &str) {
     println!("Archive task queued: {task_id}");
-}
-
-pub(super) fn print_simple_ack(message: &str) {
-    println!("{message}");
 }
 
 pub(super) fn print_comment_action(label: &str, comment: &CommentSummary) {

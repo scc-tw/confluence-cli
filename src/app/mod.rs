@@ -1,13 +1,10 @@
-pub use crate::application::attachments::{
-    attachment_delete, attachment_download_all, attachment_list, attachment_upload,
-};
+pub use crate::application::attachments::{attachment_delete, attachment_list};
 pub use crate::application::comments::{
     comment_create, comment_delete, comment_info, comment_list, comment_reopen, comment_resolve,
 };
 pub use crate::application::pages::{
-    PageExportResult, list_spaces, page_archive, page_children, page_create, page_delete,
-    page_export, page_info, page_move, page_patch, page_read, page_search, page_search_cql,
-    page_update,
+    list_spaces, page_archive, page_children, page_create, page_delete, page_info, page_move,
+    page_patch, page_read, page_search, page_search_cql, page_update,
 };
 pub use crate::application::properties::{
     property_delete, property_get, property_list, property_set,
@@ -16,7 +13,6 @@ pub use crate::application::properties::{
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::{AttachmentsApi, CommentsApi, PagesApi, PropertiesApi};
     use crate::application::models::{
         ArchiveResult, AttachmentSummary, AttachmentUploadRequest, CommentCreateRequest,
         CommentSummary, ContentProperty, CreatePageRequest, MovePageRequest, PageBody, PageSummary,
@@ -26,8 +22,10 @@ mod tests {
         ResolvedProfile, RuntimeConfig, RuntimeContext, RuntimeProfiles, ensure_writable,
     };
     use crate::domain::{BodyFormat, CommentLocation, DeleteMode, MoveTarget, PageId, PageRef};
+    use crate::infrastructure::content_io;
     use crate::profile::AuthKind;
     use crate::support::{ConfluenceCliError, Result};
+    use crate::{AttachmentsApi, CommentsApi, PagesApi, PropertiesApi};
     use serde_json::Value;
     use std::cell::RefCell;
     use std::fs;
@@ -367,7 +365,7 @@ mod tests {
         let api = FakeApi::default();
         let dir = tempdir().expect("tempdir should exist");
 
-        let result = page_export(
+        let result = content_io::export_page_to_dir(
             &api,
             &PageRef::Id(PageId::new(1)),
             dir.path(),
@@ -464,7 +462,6 @@ mod tests {
                     api_token: Some("token".to_owned()),
                     password: None,
                     read_only: true,
-                    secret_backend: Some(crate::secret::SecretBackend::Keyring),
                 }),
             },
         };

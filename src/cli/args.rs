@@ -166,7 +166,7 @@ pub struct ProfileArgs {
     #[arg(long)]
     pub password: Option<String>,
     #[arg(long)]
-    pub read_only: bool,
+    pub read_only: Option<bool>,
 }
 
 #[derive(Debug, Subcommand)]

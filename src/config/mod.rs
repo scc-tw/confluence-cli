@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::profile::AuthKind;
-use crate::support::{ConfluenceCliError, Result};
+use crate::support::Result;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -65,75 +65,14 @@ pub fn default_config_path() -> PathBuf {
     PathBuf::from("config.json")
 }
 
-pub fn init_config(path: &Path, profile_name: &str, profile: Profile) -> Result<ConfigFile> {
-    let mut config = ConfigFile {
-        active_profile: Some(profile_name.to_owned()),
-        ..ConfigFile::default()
-    };
-    config
-        .profiles
-        .insert(profile_name.to_owned(), ensure_profile_id(profile));
-    save_config(path, &config)?;
-    Ok(config)
-}
-
-pub fn upsert_profile(
-    path: &Path,
-    profile_name: &str,
-    profile: Profile,
-    set_active: bool,
-) -> Result<ConfigFile> {
-    let mut config = load_config(path)?;
-    config
-        .profiles
-        .insert(profile_name.to_owned(), ensure_profile_id(profile));
-    if set_active {
-        config.active_profile = Some(profile_name.to_owned());
-    }
-    save_config(path, &config)?;
-    Ok(config)
-}
-
-pub fn ensure_profile_id(mut profile: Profile) -> Profile {
-    if profile.id.is_none() {
-        profile.id = Some(uuid::Uuid::new_v4().to_string());
-    }
-    profile
-}
-
-pub fn set_active_profile(path: &Path, profile_name: &str) -> Result<ConfigFile> {
-    let mut config = load_config(path)?;
-    if !config.profiles.contains_key(profile_name) {
-        return Err(ConfluenceCliError::Config(format!(
-            "profile '{profile_name}' not found"
-        )));
-    }
-
-    config.active_profile = Some(profile_name.to_owned());
-    save_config(path, &config)?;
-    Ok(config)
-}
-
-pub fn remove_profile(path: &Path, profile_name: &str) -> Result<ConfigFile> {
-    let mut config = load_config(path)?;
-    if config.profiles.remove(profile_name).is_none() {
-        return Err(ConfluenceCliError::Config(format!(
-            "profile '{profile_name}' not found"
-        )));
-    }
-
-    if config.active_profile.as_deref() == Some(profile_name) {
-        config.active_profile = config.profiles.keys().next().cloned();
-    }
-
-    save_config(path, &config)?;
-    Ok(config)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ConfluenceCliError;
     use crate::application::runtime::ResolveOptions;
+    use crate::infrastructure::profile_manager::{
+        init_config, remove_profile, set_active_profile, upsert_profile,
+    };
     use crate::infrastructure::runtime_loader::{
         load_runtime, load_runtime_with_store, resolve_profile_state, resolve_profile_with_store,
     };

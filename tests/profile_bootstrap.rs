@@ -87,3 +87,142 @@ fn profile_add_preserves_existing_profile_id() {
         "staging.example.atlassian.net"
     );
 }
+
+#[test]
+fn profile_add_preserves_secret_backend_and_auth_type_without_new_secrets() {
+    let dir = tempdir().expect("tempdir should be created");
+    let config_path = dir.path().join("config.json");
+
+    run_from([
+        "confluence",
+        "--config-path",
+        config_path
+            .to_str()
+            .expect("config path should be valid utf-8"),
+        "config",
+        "init",
+        "--name",
+        "work",
+        "--domain",
+        "example.atlassian.net",
+        "--auth-type",
+        "bearer",
+        "--api-token",
+        "token-123",
+    ])
+    .expect("config init should succeed");
+
+    run_from([
+        "confluence",
+        "--config-path",
+        config_path
+            .to_str()
+            .expect("config path should be valid utf-8"),
+        "profile",
+        "add",
+        "work",
+        "--domain",
+        "staging.example.atlassian.net",
+    ])
+    .expect("profile add should preserve auth linkage");
+
+    let after: Value = serde_json::from_str(
+        &fs::read_to_string(&config_path).expect("config should still exist after update"),
+    )
+    .expect("config json should parse");
+
+    assert_eq!(after["profiles"]["work"]["secret_backend"], "keyring");
+    assert_eq!(after["profiles"]["work"]["auth_type"], "bearer");
+    assert_eq!(
+        after["profiles"]["work"]["domain"],
+        "staging.example.atlassian.net"
+    );
+}
+
+#[test]
+fn profile_add_preserves_read_only_when_flag_is_omitted() {
+    let dir = tempdir().expect("tempdir should be created");
+    let config_path = dir.path().join("config.json");
+
+    run_from([
+        "confluence",
+        "--config-path",
+        config_path
+            .to_str()
+            .expect("config path should be valid utf-8"),
+        "config",
+        "init",
+        "--name",
+        "work",
+        "--domain",
+        "example.atlassian.net",
+        "--read-only",
+        "true",
+    ])
+    .expect("config init should succeed");
+
+    run_from([
+        "confluence",
+        "--config-path",
+        config_path
+            .to_str()
+            .expect("config path should be valid utf-8"),
+        "profile",
+        "add",
+        "work",
+        "--domain",
+        "staging.example.atlassian.net",
+    ])
+    .expect("profile add should preserve read_only");
+
+    let after: Value = serde_json::from_str(
+        &fs::read_to_string(&config_path).expect("config should still exist after update"),
+    )
+    .expect("config json should parse");
+
+    assert_eq!(after["profiles"]["work"]["read_only"], true);
+}
+
+#[test]
+fn profile_add_preserves_legacy_plaintext_secret_when_no_new_secret_is_provided() {
+    let dir = tempdir().expect("tempdir should be created");
+    let config_path = dir.path().join("config.json");
+
+    fs::write(
+        &config_path,
+        r#"{
+          "active_profile": "work",
+          "profiles": {
+            "work": {
+              "id": "profile-1",
+              "domain": "example.atlassian.net",
+              "auth_type": "bearer",
+              "api_token": "legacy-token"
+            }
+          }
+        }"#,
+    )
+    .expect("legacy config should be written");
+
+    run_from([
+        "confluence",
+        "--config-path",
+        config_path
+            .to_str()
+            .expect("config path should be valid utf-8"),
+        "profile",
+        "add",
+        "work",
+        "--domain",
+        "staging.example.atlassian.net",
+    ])
+    .expect("profile add should preserve legacy plaintext secret");
+
+    let after: Value = serde_json::from_str(
+        &fs::read_to_string(&config_path).expect("config should still exist after update"),
+    )
+    .expect("config json should parse");
+
+    assert_eq!(after["profiles"]["work"]["api_token"], "legacy-token");
+    assert_eq!(after["profiles"]["work"]["auth_type"], "bearer");
+}
