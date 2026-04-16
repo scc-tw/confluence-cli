@@ -1,6 +1,6 @@
 use confluence_cli::{
-    ConfluenceCliError, DirEntry, NodeHandle, NodeKind, NodeStat, PageNode, Result, SpaceNode,
-    VirtualFileSystem,
+    ConfluenceCliError, DirEntry, NodeCapability, NodeHandle, NodeKind, NodeStat, PageNode, Result,
+    SpaceNode, VirtualFileSystem,
 };
 
 struct FakeVfs;
@@ -11,22 +11,28 @@ impl VirtualFileSystem for FakeVfs {
             NodeHandle::Root => NodeStat {
                 kind: NodeKind::Root,
                 name: "/".to_owned(),
-                readable: false,
-                listable: true,
+                capabilities: vec![NodeCapability::List, NodeCapability::Traverse],
                 has_children: None,
             },
             NodeHandle::Space(space) => NodeStat {
                 kind: NodeKind::Space,
                 name: space.key.clone(),
-                readable: false,
-                listable: true,
+                capabilities: vec![
+                    NodeCapability::List,
+                    NodeCapability::Traverse,
+                    NodeCapability::Search,
+                    NodeCapability::Create,
+                ],
                 has_children: None,
             },
             NodeHandle::Page(page) => NodeStat {
                 kind: NodeKind::Page,
                 name: page.title.clone(),
-                readable: true,
-                listable: true,
+                capabilities: vec![
+                    NodeCapability::Read,
+                    NodeCapability::List,
+                    NodeCapability::Traverse,
+                ],
                 has_children: None,
             },
         })
@@ -45,8 +51,12 @@ impl VirtualFileSystem for FakeVfs {
                 stat: NodeStat {
                     kind: NodeKind::Space,
                     name: "ALPHA".to_owned(),
-                    readable: false,
-                    listable: true,
+                    capabilities: vec![
+                        NodeCapability::List,
+                        NodeCapability::Traverse,
+                        NodeCapability::Search,
+                        NodeCapability::Create,
+                    ],
                     has_children: None,
                 },
             }]),
@@ -61,8 +71,11 @@ impl VirtualFileSystem for FakeVfs {
                     stat: NodeStat {
                         kind: NodeKind::Page,
                         name: "Notebook".to_owned(),
-                        readable: true,
-                        listable: true,
+                        capabilities: vec![
+                            NodeCapability::Read,
+                            NodeCapability::List,
+                            NodeCapability::Traverse,
+                        ],
                         has_children: None,
                     },
                 },
@@ -76,8 +89,11 @@ impl VirtualFileSystem for FakeVfs {
                     stat: NodeStat {
                         kind: NodeKind::Page,
                         name: "Notebook".to_owned(),
-                        readable: true,
-                        listable: true,
+                        capabilities: vec![
+                            NodeCapability::Read,
+                            NodeCapability::List,
+                            NodeCapability::Traverse,
+                        ],
                         has_children: None,
                     },
                 },
@@ -154,4 +170,19 @@ fn fake_vfs_requires_page_id_when_titles_are_ambiguous() {
         }
         other => panic!("unexpected error: {other:?}"),
     }
+}
+
+#[test]
+fn fake_vfs_stat_exposes_capabilities() {
+    let page = NodeHandle::Page(PageNode {
+        id: 2,
+        title: "Notebook".to_owned(),
+        space_id: Some("100".to_owned()),
+    });
+
+    let stat = FakeVfs.stat(&page).expect("page stat should be available");
+    assert!(stat.supports(NodeCapability::Read));
+    assert!(stat.supports(NodeCapability::List));
+    assert!(stat.supports(NodeCapability::Traverse));
+    assert!(!stat.supports(NodeCapability::Create));
 }

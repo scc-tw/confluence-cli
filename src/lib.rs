@@ -25,7 +25,8 @@ pub use application::models::{
     SpaceSummary, UpdatePageRequest,
 };
 pub use application::vfs::{
-    DirEntry, NodeHandle, NodeKind, NodeStat, PageNode, SpaceNode, VirtualFileSystem,
+    DirEntry, NodeCapability, NodeHandle, NodeKind, NodeStat, PageNode, SpaceNode,
+    VirtualFileSystem,
 };
 pub use application::pages::PageExportResult;
 pub use application::runtime::{ResolveOptions, ResolvedProfile, RuntimeConfig};

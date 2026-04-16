@@ -1,6 +1,7 @@
 use crate::application::models::{PageSummary, SpaceSummary};
 use crate::application::vfs::{
-    DirEntry, NodeHandle, NodeKind, NodeStat, PageNode, SpaceNode, VirtualFileSystem,
+    DirEntry, NodeCapability, NodeHandle, NodeKind, NodeStat, PageNode, SpaceNode,
+    VirtualFileSystem,
 };
 use crate::domain::{BodyFormat, PageId, PageRef};
 use crate::support::{ConfluenceCliError, Result};
@@ -23,22 +24,28 @@ impl<A: PagesApi> VirtualFileSystem for ConfluenceVfs<A> {
             NodeHandle::Root => Ok(NodeStat {
                 kind: NodeKind::Root,
                 name: "/".to_owned(),
-                readable: false,
-                listable: true,
+                capabilities: vec![NodeCapability::List, NodeCapability::Traverse],
                 has_children: None,
             }),
             NodeHandle::Space(space) => Ok(NodeStat {
                 kind: NodeKind::Space,
                 name: space.key.clone(),
-                readable: false,
-                listable: true,
+                capabilities: vec![
+                    NodeCapability::List,
+                    NodeCapability::Traverse,
+                    NodeCapability::Search,
+                    NodeCapability::Create,
+                ],
                 has_children: None,
             }),
             NodeHandle::Page(page) => Ok(NodeStat {
                 kind: NodeKind::Page,
                 name: page.title.clone(),
-                readable: true,
-                listable: true,
+                capabilities: vec![
+                    NodeCapability::Read,
+                    NodeCapability::List,
+                    NodeCapability::Traverse,
+                ],
                 has_children: None,
             }),
         }
@@ -132,8 +139,11 @@ impl<A: PagesApi> ConfluenceVfs<A> {
             stat: NodeStat {
                 kind: NodeKind::Page,
                 name: title,
-                readable: true,
-                listable: true,
+                capabilities: vec![
+                    NodeCapability::Read,
+                    NodeCapability::List,
+                    NodeCapability::Traverse,
+                ],
                 has_children: None,
             },
         })
@@ -152,8 +162,12 @@ impl<A: PagesApi> ConfluenceVfs<A> {
             stat: NodeStat {
                 kind: NodeKind::Space,
                 name: display_name,
-                readable: false,
-                listable: true,
+                capabilities: vec![
+                    NodeCapability::List,
+                    NodeCapability::Traverse,
+                    NodeCapability::Search,
+                    NodeCapability::Create,
+                ],
                 has_children: None,
             },
         }

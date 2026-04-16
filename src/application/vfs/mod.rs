@@ -32,13 +32,27 @@ pub enum NodeKind {
     Page,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum NodeCapability {
+    Read,
+    List,
+    Traverse,
+    Search,
+    Create,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct NodeStat {
     pub kind: NodeKind,
     pub name: String,
-    pub readable: bool,
-    pub listable: bool,
+    pub capabilities: Vec<NodeCapability>,
     pub has_children: Option<bool>,
+}
+
+impl NodeStat {
+    pub fn supports(&self, capability: NodeCapability) -> bool {
+        self.capabilities.contains(&capability)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
