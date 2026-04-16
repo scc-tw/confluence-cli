@@ -15,7 +15,7 @@ pub fn init_profile_config(
     let existing = load_config(path)?;
     if !existing.profiles.is_empty() {
         return Err(ConfluenceCliError::Config(
-            "config already exists; use profile add or profile use instead".to_owned(),
+            "config already exists; use `confluence login` to update the active profile, `confluence profile add <name> --domain <domain> ...` to add or update a profile, or `confluence profile use <name>` to switch profiles".to_owned(),
         ));
     }
 

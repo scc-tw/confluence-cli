@@ -158,6 +158,7 @@ pub fn resolve_profile_state(
         .unwrap_or(false);
 
     validate_auth(
+        profile_name,
         &auth_type,
         email.as_deref(),
         username.as_deref(),
@@ -228,6 +229,7 @@ pub fn parse_bool(value: &str) -> Result<bool> {
 }
 
 pub fn validate_auth(
+    profile_name: &str,
     auth_type: &AuthKind,
     email: Option<&str>,
     username: Option<&str>,
@@ -239,16 +241,16 @@ pub fn validate_auth(
             let has_identity = email.is_some() || username.is_some();
             let has_secret = api_token.is_some() || password.is_some();
             if !has_identity || !has_secret {
-                return Err(ConfluenceCliError::Config(
-                    "basic auth requires email/username and api token/password".to_owned(),
-                ));
+                return Err(ConfluenceCliError::Config(format!(
+                    "profile '{profile_name}' is incomplete for basic auth; it needs an email/username and an api token/password. Run `confluence login` to repair it, use `confluence profile add {profile_name} --domain <domain> ...` to update it, or switch profiles with `confluence profile use <name>`"
+                )));
             }
         }
         AuthKind::Bearer => {
             if api_token.is_none() {
-                return Err(ConfluenceCliError::Config(
-                    "bearer auth requires CONFLUENCE_API_TOKEN".to_owned(),
-                ));
+                return Err(ConfluenceCliError::Config(format!(
+                    "profile '{profile_name}' is incomplete for bearer auth; it needs an api token. Run `confluence login` to repair it, use `confluence profile add {profile_name} --domain <domain> --auth-type bearer --api-token <token>` to update it, or switch profiles with `confluence profile use <name>`"
+                )));
             }
         }
         AuthKind::Mtls => {}
