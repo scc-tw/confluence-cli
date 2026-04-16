@@ -1,5 +1,6 @@
 mod builtins;
 mod commands;
+mod format;
 mod forward;
 mod parser;
 mod pipeline;

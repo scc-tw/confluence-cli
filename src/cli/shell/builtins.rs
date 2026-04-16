@@ -1,8 +1,8 @@
-use crate::application::vfs::DirEntry;
 use crate::support::{ConfluenceCliError, Result};
 use crate::NodeHandle;
 
 use super::commands;
+use super::format::{render_file, render_listing, ListingStyle};
 use super::state::ShellState;
 use super::{CommandOutput, ShellControl, SHELL_HELP};
 
@@ -11,6 +11,7 @@ pub fn resolve(name: &str) -> Option<Builtin> {
         "help" => Some(Builtin::Help),
         "pwd" => Some(Builtin::Pwd),
         "ls" => Some(Builtin::Ls),
+        "file" => Some(Builtin::File),
         "cd" => Some(Builtin::Cd),
         "use" => Some(Builtin::UseProfile),
         "exit" | "quit" => Some(Builtin::Exit),
@@ -25,6 +26,7 @@ pub enum Builtin {
     Help,
     Pwd,
     Ls,
+    File,
     Cd,
     UseProfile,
     Exit,
@@ -56,11 +58,21 @@ pub fn execute(
             ))
         }
         Builtin::Ls => {
-            require_range("ls", argv, 1, 2)?;
-            let handle = state.resolve_listing_target(argv.get(1).map(String::as_str))?;
+            let (style, target) = parse_ls_args(argv)?;
+            let handle = state.resolve_listing_target(target.as_deref())?;
             Ok((
                 ShellControl::Continue,
-                CommandOutput::Text(render_listing(state, &handle)?),
+                CommandOutput::Text(render_listing_output(state, &handle, style)?),
+            ))
+        }
+        Builtin::File => {
+            require_range("file", argv, 1, 2)?;
+            let lineage = state.resolve_target_lineage(argv.get(1).map(String::as_str))?;
+            let handle = lineage.last().expect("lineage always has a node");
+            let stat = state.vfs().stat(handle)?;
+            Ok((
+                ShellControl::Continue,
+                CommandOutput::Text(render_file(&state.render_lineage(&lineage), handle, &stat)),
             ))
         }
         Builtin::Cd => {
@@ -116,7 +128,11 @@ fn render_help(topic: Vec<String>) -> String {
     )
 }
 
-fn render_listing(state: &ShellState, handle: &NodeHandle) -> Result<String> {
+fn render_listing_output(
+    state: &ShellState,
+    handle: &NodeHandle,
+    style: ListingStyle,
+) -> Result<String> {
     let entries = state.vfs().read_dir(handle)?;
     if entries.is_empty() {
         let empty = match handle {
@@ -125,28 +141,7 @@ fn render_listing(state: &ShellState, handle: &NodeHandle) -> Result<String> {
         };
         return Ok(format!("{empty}\n"));
     }
-
-    let mut out = String::new();
-    for entry in entries {
-        out.push_str(&render_entry(&entry));
-        out.push('\n');
-    }
-    Ok(out)
-}
-
-fn render_entry(entry: &DirEntry) -> String {
-    match &entry.handle {
-        NodeHandle::Space(space) => format!("- {}/  {} [{}]", space.key, space.name, space.id),
-        NodeHandle::Page(page) => {
-            let suffix = if entry.stat.has_children == Some(true) {
-                "/"
-            } else {
-                ""
-            };
-            format!("- {}{} [{}]", page.title, suffix, page.id)
-        }
-        NodeHandle::Root => "- /".to_owned(),
-    }
+    Ok(render_listing(&entries, style))
 }
 
 fn require_arity(command: &str, argv: &[String], expected: usize) -> Result<()> {
@@ -175,11 +170,29 @@ fn usage_for(command: &str) -> String {
     match command {
         "pwd" => "pwd".to_owned(),
         "ls" => "ls [target]".to_owned(),
+        "file" => "file [target]".to_owned(),
         "cd" => "cd <space|page|..|/>".to_owned(),
         "help" => "help [topic]".to_owned(),
         "exit" => "exit".to_owned(),
         _ => command.to_owned(),
     }
+}
+
+fn parse_ls_args(argv: &[String]) -> Result<(ListingStyle, Option<String>)> {
+    let mut style = ListingStyle::Simple;
+    let mut target = None;
+    for arg in argv.iter().skip(1) {
+        match arg.as_str() {
+            "-l" | "--long" => style = ListingStyle::Long,
+            other if target.is_none() => target = Some(other.to_owned()),
+            _ => {
+                return Err(ConfluenceCliError::Config(
+                    "usage: ls [-l|--long] [target]".to_owned(),
+                ))
+            }
+        }
+    }
+    Ok((style, target))
 }
 
 fn reject_in_pipeline(command: &str, in_pipeline: bool) -> Result<()> {
