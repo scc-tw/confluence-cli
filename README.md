@@ -261,9 +261,15 @@ The shell now behaves more like a small virtual filesystem over Confluence:
 - `ls` lists the current directory
 - `ls -l` shows kind and capabilities
 - `file` inspects a single node
+- `stat` inspects a single node using the VFS metadata view
+- `clear` clears the visible terminal buffer
 - `cat` reads page content (default: markdown)
+- `tail` prints the last lines of piped input or page text
 - `grep` searches page text in the current subtree
 - `find` walks the current subtree
+- `whoami` shows the active shell identity
+- `seq` prints numeric sequences
+- `sleep` delays for a duration
 - `|` pipes shell-native text commands together
 
 Built-ins:
@@ -274,7 +280,12 @@ pwd
 ls
 ls -l
 file SPACE/12345
+stat SPACE/12345
 clear
+tail -n 5 [target]
+whoami
+seq 1 5
+sleep 1s
 cd SPACE
 cd 12345
 cd ..
@@ -294,13 +305,16 @@ Example shell session:
 confluence/> ls
 confluence/> ls -l
 confluence/> file SPACE/12345
+confluence/> stat SPACE/12345
 confluence/> clear
+confluence/> whoami
 confluence/> cd SPACE
 confluence/SPACE> ls
 confluence/SPACE> cd 12345
 confluence/SPACE/Project Notes> pwd
 confluence/SPACE/Project Notes> cat
 confluence/SPACE/Project Notes> cat --raw
+confluence/SPACE/Project Notes> tail -n 5
 confluence/SPACE/Project Notes> grep keyword
 confluence/SPACE> find . --name '*Guide'
 confluence/SPACE> ls . | grep Guide
