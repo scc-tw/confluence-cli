@@ -28,7 +28,7 @@ pub(super) fn config_init(
     }
 
     let (profile, secrets) = profile_from_args(profile_args, None)?;
-    let config = profile_manager::init_profile_config(name, profile, &secrets)?;
+    let config = profile_manager::init_profile_config(&path, name, profile, &secrets)?;
     print_profiles(global.output, profile_manager::runtime_profiles(config))?;
     Ok(())
 }

@@ -1,7 +1,7 @@
 use crate::application::runtime::{RuntimeConfig, RuntimeProfiles};
 use crate::config::{
-    ConfigFile, ConfigSecretBackend, Profile, default_config_path, init_config, load_config,
-    remove_profile, set_active_profile, upsert_profile,
+    ConfigFile, ConfigSecretBackend, Profile, init_config, load_config, remove_profile,
+    set_active_profile, upsert_profile,
 };
 use crate::secret::{KeyringSecretStore, SecretKind, SecretStore};
 use crate::support::{ConfluenceCliError, Result};
@@ -13,12 +13,12 @@ pub struct ProfileSecrets {
 }
 
 pub fn init_profile_config(
+    path: &std::path::Path,
     name: &str,
     profile: Profile,
     secrets: &ProfileSecrets,
 ) -> Result<ConfigFile> {
-    let path = default_config_path();
-    let existing = load_config(&path)?;
+    let existing = load_config(path)?;
     if !existing.profiles.is_empty() {
         return Err(ConfluenceCliError::Config(
             "config already exists; use profile add or profile use instead".to_owned(),
@@ -27,16 +27,24 @@ pub fn init_profile_config(
 
     let store = KeyringSecretStore;
     write_profile_secrets(&store, &profile, secrets)?;
-    init_config(&path, name, profile)
+    init_config(path, name, profile)
 }
 
 pub fn add_or_update_profile(
     path: &std::path::Path,
     name: &str,
-    profile: Profile,
+    mut profile: Profile,
     secrets: &ProfileSecrets,
     activate: bool,
 ) -> Result<ConfigFile> {
+    let existing = load_config(path)?;
+    if profile.id.is_none() {
+        profile.id = existing
+            .profiles
+            .get(name)
+            .and_then(|existing| existing.id.clone());
+    }
+
     let store = KeyringSecretStore;
     write_profile_secrets(&store, &profile, secrets)?;
     upsert_profile(path, name, profile, activate)
