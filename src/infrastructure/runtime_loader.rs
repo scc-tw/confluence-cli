@@ -1,6 +1,5 @@
 use crate::application::runtime::{
-    ConfigMigration, ResolveOptions, ResolvedProfile, RuntimeConfig, RuntimeConfigState,
-    RuntimeContext, into_runtime_config,
+    ResolveOptions, ResolvedProfile, RuntimeConfig, RuntimeContext, RuntimeProfiles,
 };
 use crate::config::{ConfigFile, ConfigSecretBackend, Profile, ensure_profile_id};
 use crate::profile::AuthKind;
@@ -45,6 +44,16 @@ pub fn load_runtime_with_store(
     }
 
     Ok(into_runtime_config(state))
+}
+
+pub fn into_runtime_config(state: RuntimeConfigState) -> RuntimeConfig {
+    RuntimeConfig {
+        profiles: RuntimeProfiles {
+            active_profile: state.config.active_profile,
+            profiles: state.config.profiles.keys().cloned().collect(),
+        },
+        resolved_profile: state.resolved_profile,
+    }
 }
 
 impl From<ConfigSecretBackend> for SecretBackend {
@@ -321,4 +330,22 @@ fn resolve_secret(
     }
 
     Ok((None, false))
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeConfigState {
+    pub config_path: std::path::PathBuf,
+    pub config: ConfigFile,
+    pub resolved_profile: Option<ResolvedProfile>,
+    pub migration: Option<ConfigMigration>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ConfigMigration {
+    pub updated_profiles: Vec<(String, Profile)>,
+}
+
+impl ConfigMigration {
+    pub fn is_empty(&self) -> bool {
+        self.updated_profiles.is_empty()
+    }
 }

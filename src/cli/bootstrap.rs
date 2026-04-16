@@ -3,26 +3,16 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 use crate::api::{HttpApiConfig, HttpConfluenceApi};
-use crate::application::runtime::{
-    ResolveOptions, ResolvedProfile, RuntimeConfig, RuntimeContext, RuntimeProfiles,
-};
+use crate::application::runtime::{ResolveOptions, ResolvedProfile, RuntimeContext};
 use crate::cli::args::CliAuthKind;
-use crate::config::{
-    ConfigFile, ConfigSecretBackend, Profile, default_config_path, init_config, load_config,
-    remove_profile, set_active_profile, upsert_profile,
-};
-use crate::infrastructure::runtime_loader;
-use crate::secret::{KeyringSecretStore, SecretKind, SecretStore};
+use crate::config::{Profile, default_config_path, load_config};
+use crate::infrastructure::{profile_manager, runtime_loader};
 use crate::support::{ConfluenceCliError, Result};
 
 use super::output::{print_profiles_human, print_profiles_json};
 use super::{GlobalArgs, OutputFormat, ProfileArgs};
 
-#[derive(Debug, Clone, Default)]
-pub(super) struct ProfileSecrets {
-    api_token: Option<String>,
-    password: Option<String>,
-}
+type ProfileSecrets = profile_manager::ProfileSecrets;
 
 pub(super) fn config_init(
     global: &GlobalArgs,
@@ -37,11 +27,9 @@ pub(super) fn config_init(
         ));
     }
 
-    let store = KeyringSecretStore;
     let (profile, secrets) = profile_from_args(profile_args, None)?;
-    write_profile_secrets(&store, &profile, &secrets)?;
-    let config = init_config(&path, name, profile)?;
-    print_profiles(global.output, config)?;
+    let config = profile_manager::init_profile_config(name, profile, &secrets)?;
+    print_profiles(global.output, profile_manager::runtime_profiles(config))?;
     Ok(())
 }
 
@@ -53,50 +41,34 @@ pub(super) fn profile_add(
 ) -> Result<()> {
     let path = config_path(global);
     let existing = load_config(&path)?;
-    let store = KeyringSecretStore;
     let existing_id = existing
         .profiles
         .get(name)
         .and_then(|profile| profile.id.clone());
     let (profile, secrets) = profile_from_args(profile_args, existing_id)?;
-    write_profile_secrets(&store, &profile, &secrets)?;
-    let config = upsert_profile(&path, name, profile, activate)?;
-    print_profiles(global.output, config)?;
+    let config = profile_manager::add_or_update_profile(&path, name, profile, &secrets, activate)?;
+    print_profiles(global.output, profile_manager::runtime_profiles(config))?;
     Ok(())
 }
 
 pub(super) fn profile_use(global: &GlobalArgs, name: &str) -> Result<()> {
     let path = config_path(global);
-    let config = set_active_profile(&path, name)?;
-    print_profiles(global.output, config)?;
+    let config = profile_manager::use_profile(&path, name)?;
+    print_profiles(global.output, profile_manager::runtime_profiles(config))?;
     Ok(())
 }
 
 pub(super) fn profile_remove(global: &GlobalArgs, name: &str) -> Result<()> {
     let path = config_path(global);
-    if let Some(profile) = load_config(&path)?.profiles.get(name).cloned()
-        && profile.secret_backend.is_some()
-    {
-        let store = KeyringSecretStore;
-        let profile_id = profile.id.as_deref().unwrap_or(name);
-        store.delete(profile_id, SecretKind::ApiToken)?;
-        store.delete(profile_id, SecretKind::Password)?;
-    }
-    let config = remove_profile(&path, name)?;
-    print_profiles(global.output, config)?;
+    let config = profile_manager::remove_profile_with_secrets(&path, name)?;
+    print_profiles(global.output, profile_manager::runtime_profiles(config))?;
     Ok(())
 }
 
 pub(super) fn profile_list(global: &GlobalArgs) -> Result<()> {
     let path = config_path(global);
     let config = load_config(&path)?;
-    let runtime = RuntimeConfig {
-        profiles: RuntimeProfiles {
-            active_profile: config.active_profile,
-            profiles: config.profiles.keys().cloned().collect(),
-        },
-        resolved_profile: None,
-    };
+    let runtime = profile_manager::runtime_profiles(config);
     match global.output {
         OutputFormat::Human => print_profiles_human(&runtime),
         OutputFormat::Json => super::output::print_profiles_json(&runtime)?,
@@ -169,34 +141,17 @@ fn profile_from_args(
             api_token: None,
             password: None,
             read_only: args.read_only.then_some(true),
-            secret_backend: if secrets.api_token.is_some() || secrets.password.is_some() {
-                Some(ConfigSecretBackend::Keyring)
-            } else {
-                None
-            },
+            secret_backend: None,
         },
         secrets,
     ))
-}
-
-fn write_profile_secrets(
-    store: &dyn SecretStore,
-    profile: &Profile,
-    secrets: &ProfileSecrets,
-) -> Result<()> {
-    let profile_id = profile
-        .id
-        .as_deref()
-        .ok_or_else(|| ConfluenceCliError::Config("profile id missing".to_owned()))?;
-
-    if let Some(api_token) = secrets.api_token.as_deref() {
-        store.set(profile_id, SecretKind::ApiToken, api_token)?;
-    }
-    if let Some(password) = secrets.password.as_deref() {
-        store.set(profile_id, SecretKind::Password, password)?;
-    }
-
-    Ok(())
+    .map(|(mut profile, secrets)| {
+        profile_manager::attach_secret_backend(
+            &mut profile,
+            secrets.api_token.is_some() || secrets.password.is_some(),
+        );
+        (profile, secrets)
+    })
 }
 
 fn config_path(global: &GlobalArgs) -> PathBuf {
@@ -206,15 +161,10 @@ fn config_path(global: &GlobalArgs) -> PathBuf {
         .unwrap_or_else(default_config_path)
 }
 
-fn print_profiles(output: OutputFormat, config: ConfigFile) -> Result<()> {
-    let runtime = RuntimeConfig {
-        profiles: RuntimeProfiles {
-            active_profile: config.active_profile,
-            profiles: config.profiles.keys().cloned().collect(),
-        },
-        resolved_profile: None,
-    };
-
+fn print_profiles(
+    output: OutputFormat,
+    runtime: crate::application::runtime::RuntimeConfig,
+) -> Result<()> {
     match output {
         OutputFormat::Human => print_profiles_human(&runtime),
         OutputFormat::Json => print_profiles_json(&runtime)?,

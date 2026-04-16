@@ -3,14 +3,6 @@ use std::path::PathBuf;
 use crate::secret::SecretBackend;
 use crate::support::{ConfluenceCliError, Result};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeConfigState {
-    pub config_path: PathBuf,
-    pub config: crate::config::ConfigFile,
-    pub resolved_profile: Option<ResolvedProfile>,
-    pub migration: Option<ConfigMigration>,
-}
-
 #[derive(Debug, Clone)]
 pub struct RuntimeContext {
     pub runtime_config: RuntimeConfig,
@@ -57,27 +49,6 @@ pub struct RuntimeConfig {
 pub struct RuntimeProfiles {
     pub active_profile: Option<String>,
     pub profiles: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ConfigMigration {
-    pub updated_profiles: Vec<(String, crate::config::Profile)>,
-}
-
-impl ConfigMigration {
-    pub fn is_empty(&self) -> bool {
-        self.updated_profiles.is_empty()
-    }
-}
-
-pub fn into_runtime_config(state: RuntimeConfigState) -> RuntimeConfig {
-    RuntimeConfig {
-        profiles: RuntimeProfiles {
-            active_profile: state.config.active_profile,
-            profiles: state.config.profiles.keys().cloned().collect(),
-        },
-        resolved_profile: state.resolved_profile,
-    }
 }
 
 pub fn ensure_writable(runtime: &RuntimeContext) -> Result<()> {
