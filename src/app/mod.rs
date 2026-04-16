@@ -1,504 +1,36 @@
-use crate::api::{
-    ArchiveResult, AttachmentSummary, AttachmentUploadRequest, CommentCreateRequest,
-    CommentSummary, ConfluenceApi, ContentProperty, CreatePageRequest, MovePageRequest, PageBody,
-    PageSummary, SpaceSummary, UpdatePageRequest,
+pub use crate::application::attachments::{
+    attachment_delete, attachment_download_all, attachment_list, attachment_upload,
 };
-use crate::config::{ResolveOptions, RuntimeConfig, load_runtime_with_store};
-use crate::convert::{
-    apply_unified_patch, build_bundle_metadata, convert_text, export_bundle_file,
+pub use crate::application::comments::{
+    comment_create, comment_delete, comment_info, comment_list, comment_reopen, comment_resolve,
 };
-use crate::domain::{BodyFormat, CommentLocation, DeleteMode, MoveTarget, PageId, PageRef};
-use crate::secret::{KeyringSecretStore, SecretStore};
-use crate::support::{ConfluenceCliError, Result};
-use serde_json::Value;
-use std::fs;
-use std::path::{Path, PathBuf};
-
-#[derive(Debug, Clone)]
-pub struct RuntimeContext {
-    pub runtime_config: RuntimeConfig,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct PageExportResult {
-    pub directory: PathBuf,
-    pub content_path: PathBuf,
-    pub attachment_count: usize,
-}
-
-impl RuntimeContext {
-    pub fn load(options: &ResolveOptions) -> Result<Self> {
-        let store = KeyringSecretStore;
-        Self::load_with_store(options, &store)
-    }
-
-    pub fn load_with_store(
-        options: &ResolveOptions,
-        secret_store: &dyn SecretStore,
-    ) -> Result<Self> {
-        Ok(Self {
-            runtime_config: load_runtime_with_store(options, Some(secret_store))?,
-        })
-    }
-}
-
-pub fn list_spaces<A: ConfluenceApi>(api: &A) -> Result<Vec<SpaceSummary>> {
-    api.list_spaces()
-}
-
-pub fn ensure_writable(runtime: &RuntimeContext) -> Result<()> {
-    if runtime
-        .runtime_config
-        .resolved_profile
-        .as_ref()
-        .is_some_and(|profile| profile.read_only)
-    {
-        return Err(ConfluenceCliError::Config(
-            "active profile is read-only; this command would mutate Confluence".to_owned(),
-        ));
-    }
-
-    Ok(())
-}
-
-pub fn page_info<A: ConfluenceApi>(api: &A, page: &PageRef) -> Result<PageSummary> {
-    api.get_page_info(page)
-}
-
-pub fn page_children<A: ConfluenceApi>(api: &A, page: &PageRef) -> Result<Vec<PageSummary>> {
-    api.list_child_pages(page)
-}
-
-pub fn page_read<A: ConfluenceApi>(
-    api: &A,
-    page: &PageRef,
-    format: BodyFormat,
-) -> Result<PageBody> {
-    api.read_page(page, format)
-}
-
-pub fn page_search<A: ConfluenceApi>(api: &A, query: &str) -> Result<Vec<PageSummary>> {
-    if query.trim().is_empty() {
-        return Err(ConfluenceCliError::Config(
-            "search query must not be empty".to_owned(),
-        ));
-    }
-
-    api.search_pages(query)
-}
-
-pub fn page_search_cql<A: ConfluenceApi>(api: &A, query: &str) -> Result<Vec<PageSummary>> {
-    if query.trim().is_empty() {
-        return Err(ConfluenceCliError::Config(
-            "search query must not be empty".to_owned(),
-        ));
-    }
-
-    api.search_pages_cql(query)
-}
-
-pub fn page_archive<A: ConfluenceApi>(api: &A, page: &PageRef) -> Result<ArchiveResult> {
-    api.archive_page(page)
-}
-
-pub fn page_delete<A: ConfluenceApi>(
-    api: &A,
-    page: &PageRef,
-    mode: DeleteMode,
-    yes_im_sure: bool,
-) -> Result<()> {
-    if matches!(mode, DeleteMode::Purge) && !yes_im_sure {
-        return Err(ConfluenceCliError::Config(
-            "purge requires --yes-im-sure".to_owned(),
-        ));
-    }
-
-    api.delete_page(page, mode)
-}
-
-pub fn page_update<A: ConfluenceApi>(
-    api: &A,
-    page: &PageRef,
-    title: String,
-    storage_body: String,
-    version: u32,
-) -> Result<PageSummary> {
-    if title.trim().is_empty() {
-        return Err(ConfluenceCliError::Config(
-            "page update requires a non-empty title".to_owned(),
-        ));
-    }
-
-    if storage_body.trim().is_empty() {
-        return Err(ConfluenceCliError::Config(
-            "page update requires a non-empty storage body".to_owned(),
-        ));
-    }
-
-    api.update_page(UpdatePageRequest {
-        page: page.clone(),
-        title,
-        storage_body,
-        version,
-    })
-}
-
-pub fn page_create<A: ConfluenceApi>(
-    api: &A,
-    title: String,
-    storage_body: String,
-    space_id: Option<String>,
-    space_key: Option<String>,
-    parent: Option<PageRef>,
-) -> Result<PageSummary> {
-    if title.trim().is_empty() {
-        return Err(ConfluenceCliError::Config(
-            "page create requires a non-empty title".to_owned(),
-        ));
-    }
-
-    if storage_body.trim().is_empty() {
-        return Err(ConfluenceCliError::Config(
-            "page create requires a non-empty storage body".to_owned(),
-        ));
-    }
-
-    if space_id.is_some() && space_key.is_some() {
-        return Err(ConfluenceCliError::Config(
-            "page create accepts either space id or space key, not both".to_owned(),
-        ));
-    }
-
-    let resolved_parent_id = match parent.as_ref() {
-        Some(PageRef::Id(page_id)) => Some(*page_id),
-        Some(PageRef::Url(_)) => Some(PageId::new(
-            api.get_page_info(parent.as_ref().expect("parent exists"))?
-                .id,
-        )),
-        None => None,
-    };
-
-    let resolved_space_id = if let Some(space_id) = space_id {
-        space_id
-    } else if let Some(space_key) = space_key {
-        api.list_spaces()?
-            .into_iter()
-            .find(|space| space.key.eq_ignore_ascii_case(&space_key))
-            .map(|space| space.id)
-            .ok_or_else(|| {
-                ConfluenceCliError::Config(format!("space key '{space_key}' not found"))
-            })?
-    } else if let Some(parent) = parent.as_ref() {
-        api.get_page_info(parent)?.space_id.ok_or_else(|| {
-            ConfluenceCliError::Config("parent page did not expose a space id".to_owned())
-        })?
-    } else {
-        return Err(ConfluenceCliError::Config(
-            "page create requires either --space-id, --space-key, or --parent".to_owned(),
-        ));
-    };
-
-    api.create_page(CreatePageRequest {
-        title,
-        storage_body,
-        space_id: resolved_space_id,
-        parent_id: resolved_parent_id,
-    })
-}
-
-pub fn page_patch<A: ConfluenceApi>(
-    api: &A,
-    page: &PageRef,
-    base: &str,
-    patch: &str,
-) -> Result<PageSummary> {
-    let current = api.read_page(page, BodyFormat::Storage)?;
-    if current.content != base {
-        return Err(ConfluenceCliError::Config(
-            "page patch base file does not match the current remote storage body".to_owned(),
-        ));
-    }
-
-    let version = current.page.version.ok_or_else(|| {
-        ConfluenceCliError::Config("page patch requires a current version".to_owned())
-    })?;
-    let updated_body = apply_unified_patch(base, patch)?;
-
-    api.update_page(UpdatePageRequest {
-        page: page.clone(),
-        title: current.page.title,
-        storage_body: updated_body,
-        version: version + 1,
-    })
-}
-
-pub fn page_move<A: ConfluenceApi>(
-    api: &A,
-    page: &PageRef,
-    target: MoveTarget,
-    title: Option<String>,
-) -> Result<PageSummary> {
-    api.move_page(MovePageRequest {
-        page: page.clone(),
-        target,
-        title,
-    })
-}
-
-pub fn page_export<A: ConfluenceApi>(
-    api: &A,
-    page: &PageRef,
-    directory: &Path,
-    format: BodyFormat,
-    include_attachments: bool,
-) -> Result<PageExportResult> {
-    let summary = api.get_page_info(page)?;
-    let storage = api.read_page(page, BodyFormat::Storage)?;
-    let (file_name, content) = match format {
-        BodyFormat::Markdown => (
-            "page.md",
-            convert_text(&storage.content, BodyFormat::Storage, BodyFormat::Markdown)?,
-        ),
-        BodyFormat::Storage => ("page.storage", storage.content.clone()),
-        BodyFormat::Text => (
-            "page.txt",
-            convert_text(&storage.content, BodyFormat::Storage, BodyFormat::Text)?,
-        ),
-        BodyFormat::Html => ("page.html", api.read_page(page, BodyFormat::Html)?.content),
-    };
-
-    let metadata = build_bundle_metadata(
-        Some(summary.id),
-        Some(summary.title.clone()),
-        summary.version,
-        &storage.content,
-    );
-    export_bundle_file(directory, &metadata, file_name, &content)?;
-
-    let attachment_count = if include_attachments {
-        let attachments_dir = directory.join("attachments");
-        attachment_download_all(api, page, &attachments_dir)?.len()
-    } else {
-        0
-    };
-
-    Ok(PageExportResult {
-        directory: directory.to_path_buf(),
-        content_path: directory.join(file_name),
-        attachment_count,
-    })
-}
-
-pub fn attachment_list<A: ConfluenceApi>(
-    api: &A,
-    page: &PageRef,
-) -> Result<Vec<AttachmentSummary>> {
-    api.list_attachments(page)
-}
-
-pub fn attachment_download_all<A: ConfluenceApi>(
-    api: &A,
-    page: &PageRef,
-    directory: &Path,
-) -> Result<Vec<PathBuf>> {
-    fs::create_dir_all(directory)?;
-    let attachments = api.list_attachments(page)?;
-    let mut written = Vec::with_capacity(attachments.len());
-    for attachment in attachments {
-        let path = unique_path_for(directory, &attachment.title);
-        let bytes = api.download_attachment(page, &attachment.id)?;
-        fs::write(&path, bytes)?;
-        written.push(path);
-    }
-    Ok(written)
-}
-
-pub fn attachment_upload<A: ConfluenceApi>(
-    api: &A,
-    page: &PageRef,
-    file_path: PathBuf,
-    comment: Option<String>,
-    minor_edit: bool,
-    replace: bool,
-) -> Result<Vec<AttachmentSummary>> {
-    if !file_path.exists() {
-        return Err(ConfluenceCliError::Config(format!(
-            "attachment file '{}' does not exist",
-            file_path.display()
-        )));
-    }
-
-    api.upload_attachment(AttachmentUploadRequest {
-        page: page.clone(),
-        file_path,
-        comment,
-        minor_edit,
-        replace,
-    })
-}
-
-pub fn attachment_delete<A: ConfluenceApi>(
-    api: &A,
-    page: &PageRef,
-    attachment_id: &str,
-) -> Result<()> {
-    if attachment_id.trim().is_empty() {
-        return Err(ConfluenceCliError::Config(
-            "attachment delete requires a non-empty attachment id".to_owned(),
-        ));
-    }
-
-    api.delete_attachment(page, attachment_id)
-}
-
-pub fn property_list<A: ConfluenceApi>(api: &A, page: &PageRef) -> Result<Vec<ContentProperty>> {
-    api.list_properties(page)
-}
-
-pub fn property_get<A: ConfluenceApi>(
-    api: &A,
-    page: &PageRef,
-    key: &str,
-) -> Result<ContentProperty> {
-    require_property_key(key)?;
-    api.get_property(page, key)
-}
-
-pub fn property_set<A: ConfluenceApi>(
-    api: &A,
-    page: &PageRef,
-    key: &str,
-    value: Value,
-) -> Result<ContentProperty> {
-    require_property_key(key)?;
-    api.set_property(page, key, value)
-}
-
-pub fn property_delete<A: ConfluenceApi>(api: &A, page: &PageRef, key: &str) -> Result<()> {
-    require_property_key(key)?;
-    api.delete_property(page, key)
-}
-
-pub fn comment_list<A: ConfluenceApi>(
-    api: &A,
-    page: &PageRef,
-    location: Option<CommentLocation>,
-) -> Result<Vec<CommentSummary>> {
-    api.list_comments(page, location)
-}
-
-pub fn comment_info<A: ConfluenceApi>(api: &A, comment_id: &str) -> Result<CommentSummary> {
-    if comment_id.trim().is_empty() {
-        return Err(ConfluenceCliError::Config(
-            "comment info requires a non-empty comment id".to_owned(),
-        ));
-    }
-
-    api.get_comment(comment_id)
-}
-
-pub fn comment_create<A: ConfluenceApi>(
-    api: &A,
-    page: &PageRef,
-    body_storage: String,
-    location: CommentLocation,
-    parent_id: Option<String>,
-    inline_properties: Option<Value>,
-) -> Result<CommentSummary> {
-    if body_storage.trim().is_empty() {
-        return Err(ConfluenceCliError::Config(
-            "comment create requires a non-empty body".to_owned(),
-        ));
-    }
-
-    if matches!(location, CommentLocation::Inline) && inline_properties.is_none() {
-        return Err(ConfluenceCliError::NotImplemented(
-            "inline comment creation requires explicit inline properties".to_owned(),
-        ));
-    }
-
-    api.create_comment(CommentCreateRequest {
-        page: page.clone(),
-        body_storage,
-        parent_id,
-        location,
-        inline_properties,
-    })
-}
-
-pub fn comment_delete<A: ConfluenceApi>(api: &A, comment_id: &str) -> Result<()> {
-    if comment_id.trim().is_empty() {
-        return Err(ConfluenceCliError::Config(
-            "comment delete requires a non-empty comment id".to_owned(),
-        ));
-    }
-
-    api.delete_comment(comment_id)
-}
-
-pub fn comment_resolve<A: ConfluenceApi>(api: &A, comment_id: &str) -> Result<CommentSummary> {
-    if comment_id.trim().is_empty() {
-        return Err(ConfluenceCliError::Config(
-            "comment resolve requires a non-empty comment id".to_owned(),
-        ));
-    }
-
-    api.set_inline_comment_resolution(comment_id, true)
-}
-
-pub fn comment_reopen<A: ConfluenceApi>(api: &A, comment_id: &str) -> Result<CommentSummary> {
-    if comment_id.trim().is_empty() {
-        return Err(ConfluenceCliError::Config(
-            "comment reopen requires a non-empty comment id".to_owned(),
-        ));
-    }
-
-    api.set_inline_comment_resolution(comment_id, false)
-}
-
-fn require_property_key(key: &str) -> Result<()> {
-    if key.trim().is_empty() {
-        Err(ConfluenceCliError::Config(
-            "property key must not be empty".to_owned(),
-        ))
-    } else {
-        Ok(())
-    }
-}
-
-fn unique_path_for(directory: &Path, file_name: &str) -> PathBuf {
-    let candidate = directory.join(file_name);
-    if !candidate.exists() {
-        return candidate;
-    }
-
-    let source = Path::new(file_name);
-    let stem = source
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or("attachment");
-    let extension = source.extension().and_then(|value| value.to_str());
-
-    for index in 1.. {
-        let next_name = match extension {
-            Some(extension) => format!("{stem} ({index}).{extension}"),
-            None => format!("{stem} ({index})"),
-        };
-        let next_path = directory.join(next_name);
-        if !next_path.exists() {
-            return next_path;
-        }
-    }
-
-    unreachable!("attachment path generation should always terminate")
-}
+pub use crate::application::pages::{
+    PageExportResult, list_spaces, page_archive, page_children, page_create, page_delete,
+    page_export, page_info, page_move, page_patch, page_read, page_search, page_search_cql,
+    page_update,
+};
+pub use crate::application::properties::{
+    property_delete, property_get, property_list, property_set,
+};
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::{ConfluenceApi, UpdatePageRequest};
-    use crate::domain::PageId;
+    use crate::api::{AttachmentsApi, CommentsApi, PagesApi, PropertiesApi};
+    use crate::application::models::{
+        ArchiveResult, AttachmentSummary, AttachmentUploadRequest, CommentCreateRequest,
+        CommentSummary, ContentProperty, CreatePageRequest, MovePageRequest, PageBody, PageSummary,
+        SpaceSummary, UpdatePageRequest,
+    };
+    use crate::application::runtime::{
+        ResolvedProfile, RuntimeConfig, RuntimeContext, RuntimeProfiles, ensure_writable,
+    };
+    use crate::domain::{BodyFormat, CommentLocation, DeleteMode, MoveTarget, PageId, PageRef};
+    use crate::profile::AuthKind;
+    use crate::support::{ConfluenceCliError, Result};
+    use serde_json::Value;
     use std::cell::RefCell;
+    use std::fs;
     use tempfile::tempdir;
 
     #[derive(Default)]
@@ -509,7 +41,7 @@ mod tests {
         comments: RefCell<Vec<CommentCreateRequest>>,
     }
 
-    impl ConfluenceApi for FakeApi {
+    impl PagesApi for FakeApi {
         fn list_spaces(&self) -> Result<Vec<SpaceSummary>> {
             Ok(vec![SpaceSummary {
                 id: "100".to_owned(),
@@ -520,7 +52,9 @@ mod tests {
 
         fn create_page(&self, request: CreatePageRequest) -> Result<PageSummary> {
             Ok(PageSummary {
-                id: request.parent_id.map_or(10, |parent| parent.get() + 1),
+                id: request
+                    .parent_id
+                    .map_or(10, |parent: crate::domain::PageId| parent.get() + 1),
                 title: request.title,
                 status: Some("current".to_owned()),
                 space_id: Some(request.space_id),
@@ -602,7 +136,9 @@ mod tests {
                 version: Some(4),
             })
         }
+    }
 
+    impl AttachmentsApi for FakeApi {
         fn list_attachments(&self, _page: &PageRef) -> Result<Vec<AttachmentSummary>> {
             Ok(vec![
                 AttachmentSummary {
@@ -634,12 +170,7 @@ mod tests {
         ) -> Result<Vec<AttachmentSummary>> {
             Ok(vec![AttachmentSummary {
                 id: "uploaded".to_owned(),
-                title: request
-                    .file_path
-                    .file_name()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or("file.bin")
-                    .to_owned(),
+                title: request.file_name,
                 media_type: "application/octet-stream".to_owned(),
                 file_size: 1,
                 version: Some(if request.replace { 2 } else { 1 }),
@@ -650,7 +181,9 @@ mod tests {
         fn delete_attachment(&self, _page: &PageRef, _attachment_id: &str) -> Result<()> {
             Ok(())
         }
+    }
 
+    impl PropertiesApi for FakeApi {
         fn list_properties(&self, _page: &PageRef) -> Result<Vec<ContentProperty>> {
             Ok(vec![ContentProperty {
                 key: "color".to_owned(),
@@ -683,7 +216,9 @@ mod tests {
         fn delete_property(&self, _page: &PageRef, _key: &str) -> Result<()> {
             Ok(())
         }
+    }
 
+    impl CommentsApi for FakeApi {
         fn list_comments(
             &self,
             _page: &PageRef,
@@ -913,20 +448,23 @@ mod tests {
     fn read_only_runtime_rejects_mutations() {
         let runtime = RuntimeContext {
             runtime_config: RuntimeConfig {
-                config: crate::config::ConfigFile::default(),
-                resolved_profile: Some(crate::config::ResolvedProfile {
+                profiles: RuntimeProfiles {
+                    active_profile: None,
+                    profiles: Vec::new(),
+                },
+                resolved_profile: Some(ResolvedProfile {
                     id: "profile-1".to_owned(),
                     name: Some("work".to_owned()),
                     domain: "example.atlassian.net".to_owned(),
                     protocol: "https".to_owned(),
                     api_path: "/wiki/rest/api".to_owned(),
-                    auth_type: crate::config::AuthKind::Bearer,
+                    auth_type: AuthKind::Bearer,
                     email: None,
                     username: None,
                     api_token: Some("token".to_owned()),
                     password: None,
                     read_only: true,
-                    secret_backend: Some(crate::config::SecretBackend::Keyring),
+                    secret_backend: Some(crate::secret::SecretBackend::Keyring),
                 }),
             },
         };

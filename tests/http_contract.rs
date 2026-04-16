@@ -1,21 +1,20 @@
+use confluence_cli::AuthKind;
+use confluence_cli::ConfluenceCliError;
 use confluence_cli::api::{
-    CommentCreateRequest, ConfluenceApi, HttpConfluenceApi, MovePageRequest,
+    AttachmentsApi, CommentsApi, HttpApiConfig, HttpConfluenceApi, PagesApi, PropertiesApi,
 };
 use confluence_cli::app::{self, PageExportResult};
-use confluence_cli::config::{AuthKind, ResolvedProfile};
 use confluence_cli::domain::{CommentLocation, MoveTarget, PageId, PageRef};
 use confluence_cli::run_from;
-use confluence_cli::support::ConfluenceCliError;
+use confluence_cli::{AttachmentUploadRequest, CommentCreateRequest, MovePageRequest};
 use httpmock::Method::{DELETE, GET, POST, PUT};
 use httpmock::{Mock, MockServer};
 use serde_json::json;
 use std::fs;
 use tempfile::tempdir;
 
-fn test_profile(server: &MockServer) -> ResolvedProfile {
-    ResolvedProfile {
-        id: "profile-1".to_owned(),
-        name: Some("test".to_owned()),
+fn test_profile(server: &MockServer) -> HttpApiConfig {
+    HttpApiConfig {
         domain: server.address().to_string(),
         protocol: "http".to_owned(),
         api_path: "/wiki/rest/api".to_owned(),
@@ -24,8 +23,6 @@ fn test_profile(server: &MockServer) -> ResolvedProfile {
         username: None,
         api_token: Some("token-123".to_owned()),
         password: None,
-        read_only: false,
-        secret_backend: Some(confluence_cli::config::SecretBackend::Keyring),
     }
 }
 
@@ -326,16 +323,18 @@ fn upload_attachment_uses_post_put_and_fields() {
     });
 
     let api = HttpConfluenceApi::new(test_profile(&server)).expect("api should initialize");
-    let _ = api.upload_attachment(confluence_cli::api::AttachmentUploadRequest {
+    let _ = api.upload_attachment(AttachmentUploadRequest {
         page: PageRef::Id(PageId::new(123)),
-        file_path: file_path.clone(),
+        file_name: "spec.md".to_owned(),
+        content: fs::read(&file_path).expect("fixture should be readable"),
         comment: Some("upload".to_owned()),
         minor_edit: true,
         replace: false,
     });
-    let _ = api.upload_attachment(confluence_cli::api::AttachmentUploadRequest {
+    let _ = api.upload_attachment(AttachmentUploadRequest {
         page: PageRef::Id(PageId::new(123)),
-        file_path,
+        file_name: "spec.md".to_owned(),
+        content: fs::read(&file_path).expect("fixture should be readable"),
         comment: None,
         minor_edit: false,
         replace: true,
