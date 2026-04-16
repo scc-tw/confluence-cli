@@ -9,7 +9,7 @@ use crate::domain::{BodyFormat, DeleteMode, MoveTarget, PageRef};
 use crate::support::{ConfluenceCliError, Result};
 
 use super::dto::{ArchiveResponse, PageChildrenResponse, PageV1, PageV2, SpacesResponse};
-use super::{HttpConfluenceApi, validate_same_space};
+use super::{validate_same_space, HttpConfluenceApi};
 
 impl PagesApi for HttpConfluenceApi {
     fn list_spaces(&self) -> Result<Vec<SpaceSummary>> {
@@ -68,30 +68,40 @@ impl PagesApi for HttpConfluenceApi {
 
     fn get_page_info(&self, page: &PageRef) -> Result<PageSummary> {
         let page_id = self.resolve_page_id(page)?;
-        let request = self.authed(self.client.get(self.v2_url(&format!("/pages/{page_id}"))))?;
-        let response: PageV2 = request.send()?.error_for_status()?.json()?;
+        let response = self.get_page_v2(page_id, None)?;
         Ok(response.into_summary())
     }
 
     fn read_page(&self, page: &PageRef, format: BodyFormat) -> Result<PageBody> {
         let page_id = self.resolve_page_id(page)?;
-        let format_name = match format {
-            BodyFormat::Storage => "storage",
+        match format {
             BodyFormat::Markdown => {
                 return Err(ConfluenceCliError::NotImplemented(
                     "server-side markdown reads are not supported; use local conversion".to_owned(),
                 ));
             }
-            BodyFormat::Html => "view",
-            BodyFormat::Text => "export_view",
-        };
-
-        let response = self.get_page_v1(page_id, &format!("body.{format_name},version,space"))?;
-        Ok(PageBody {
-            page: response.clone().into_summary(),
-            format,
-            content: response.body_value(format_name).unwrap_or_default(),
-        })
+            BodyFormat::Storage | BodyFormat::Html => {
+                let format_name = match format {
+                    BodyFormat::Storage => "storage",
+                    BodyFormat::Html => "view",
+                    _ => unreachable!("handled above"),
+                };
+                let response = self.get_page_v2(page_id, Some(format_name))?;
+                Ok(PageBody {
+                    page: response.clone().into_summary(),
+                    format,
+                    content: response.body_value(format_name).unwrap_or_default(),
+                })
+            }
+            BodyFormat::Text => {
+                let response = self.get_page_v1(page_id, "body.export_view,version,space")?;
+                Ok(PageBody {
+                    page: response.clone().into_summary(),
+                    format,
+                    content: response.body_value("export_view").unwrap_or_default(),
+                })
+            }
+        }
     }
 
     fn search_pages(&self, query: &str) -> Result<Vec<PageSummary>> {

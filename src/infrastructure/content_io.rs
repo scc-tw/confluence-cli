@@ -69,8 +69,8 @@ pub fn export_page_to_dir<A: PagesApi + AttachmentsApi>(
     format: BodyFormat,
     include_attachments: bool,
 ) -> Result<PageExportResult> {
-    let summary = api.get_page_info(page)?;
     let storage = api.read_page(page, BodyFormat::Storage)?;
+    let summary = &storage.page;
     let (file_name, content) = match format {
         BodyFormat::Markdown => (
             "page.md",

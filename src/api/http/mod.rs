@@ -5,6 +5,7 @@ mod pages;
 mod properties;
 
 use reqwest::blocking::{Client, RequestBuilder};
+use reqwest::Url;
 
 use crate::domain::{CommentLocation, PageId, PageRef};
 use crate::profile::AuthKind;
@@ -109,8 +110,25 @@ impl HttpConfluenceApi {
     fn resolve_page_id(&self, page: &PageRef) -> Result<PageId> {
         match page {
             PageRef::Id(page_id) => Ok(*page_id),
-            PageRef::Url(url) => extract_page_id_from_url(url)
-                .ok_or_else(|| ConfluenceCliError::InvalidPageRef(url.clone())),
+            PageRef::Url(url) => {
+                self.validate_page_url_domain(url)?;
+
+                if let Some(page_id) = extract_page_id_from_url(url) {
+                    return Ok(page_id);
+                }
+
+                if let Some(space_key) = extract_space_key_from_overview_url(url) {
+                    return self.resolve_space_homepage_id(&space_key).map_err(|error| {
+                        ConfluenceCliError::Config(format!(
+                            "space overview URL did not resolve to a home page: {url} ({error})"
+                        ))
+                    });
+                }
+
+                Err(ConfluenceCliError::Config(format!(
+                    "page URL must include a page id (`/pages/<id>/...` or `?pageId=<id>`): {url}"
+                )))
+            }
         }
     }
 
@@ -120,6 +138,15 @@ impl HttpConfluenceApi {
                 .get(self.v1_url(&format!("/content/{page_id}")))
                 .query(&[("expand", expand)]),
         )?;
+        Ok(request.send()?.error_for_status()?.json()?)
+    }
+
+    fn get_page_v2(&self, page_id: PageId, body_format: Option<&str>) -> Result<dto::PageV2> {
+        let mut request = self.client.get(self.v2_url(&format!("/pages/{page_id}")));
+        if let Some(body_format) = body_format {
+            request = request.query(&[("body-format", body_format)]);
+        }
+        let request = self.authed(request)?;
         Ok(request.send()?.error_for_status()?.json()?)
     }
 
@@ -138,6 +165,49 @@ impl HttpConfluenceApi {
 
     fn encode_property_key(&self, key: &str) -> String {
         urlencoding::encode(key).into_owned()
+    }
+
+    fn validate_page_url_domain(&self, url: &str) -> Result<()> {
+        let parsed =
+            Url::parse(url).map_err(|_| ConfluenceCliError::InvalidPageRef(url.to_owned()))?;
+        let authority = match parsed.port() {
+            Some(port) => format!("{}:{port}", parsed.host_str().unwrap_or_default()),
+            None => parsed.host_str().unwrap_or_default().to_owned(),
+        };
+
+        if authority.eq_ignore_ascii_case(&self.profile.domain) {
+            Ok(())
+        } else {
+            Err(ConfluenceCliError::Config(format!(
+                "page URL domain '{authority}' does not match the active profile domain '{}'",
+                self.profile.domain
+            )))
+        }
+    }
+
+    fn resolve_space_homepage_id(&self, space_key: &str) -> Result<PageId> {
+        let request = self.authed(
+            self.client
+                .get(self.v2_url("/spaces"))
+                .query(&[("keys", space_key), ("limit", "1")]),
+        )?;
+        let response: dto::SpacesResponse = request.send()?.error_for_status()?.json()?;
+        let homepage_id = response
+            .results
+            .into_iter()
+            .find(|space| space.key == space_key)
+            .and_then(|space| space.homepage_id)
+            .ok_or_else(|| {
+                ConfluenceCliError::Config(format!(
+                    "space '{space_key}' does not expose a home page id"
+                ))
+            })?;
+
+        homepage_id.parse::<u64>().map(PageId::new).map_err(|_| {
+            ConfluenceCliError::Config(format!(
+                "space '{space_key}' returned an invalid home page id"
+            ))
+        })
     }
 }
 
@@ -176,19 +246,32 @@ fn validate_same_space(source: &dto::PageV1, target: &dto::PageV1) -> Result<()>
 }
 
 fn extract_page_id_from_url(url: &str) -> Option<PageId> {
-    if let Some(index) = url.find("pageId=") {
-        let value = &url[index + 7..];
-        let digits: String = value.chars().take_while(|ch| ch.is_ascii_digit()).collect();
-        if let Ok(page_id) = digits.parse::<u64>() {
+    let parsed = Url::parse(url).ok()?;
+
+    if let Some((_, value)) = parsed.query_pairs().find(|(key, _)| key == "pageId") {
+        if let Ok(page_id) = value.parse::<u64>() {
             return Some(PageId::new(page_id));
         }
     }
 
-    if let Some(index) = url.find("/pages/") {
-        let value = &url[index + 7..];
-        let digits: String = value.chars().take_while(|ch| ch.is_ascii_digit()).collect();
-        if let Ok(page_id) = digits.parse::<u64>() {
-            return Some(PageId::new(page_id));
+    let segments: Vec<_> = parsed.path_segments()?.collect();
+    for window in segments.windows(2) {
+        if window[0] == "pages" {
+            if let Ok(page_id) = window[1].parse::<u64>() {
+                return Some(PageId::new(page_id));
+            }
+        }
+    }
+
+    None
+}
+
+fn extract_space_key_from_overview_url(url: &str) -> Option<String> {
+    let parsed = Url::parse(url).ok()?;
+    let segments: Vec<_> = parsed.path_segments()?.collect();
+    for window in segments.windows(3) {
+        if window[0] == "spaces" && window[2] == "overview" {
+            return Some(window[1].to_owned());
         }
     }
 
@@ -217,6 +300,26 @@ mod tests {
         .expect("page id should be extracted");
 
         assert_eq!(page_id.get(), 99887);
+    }
+
+    #[test]
+    fn extracts_space_key_from_overview_url() {
+        let space_key = extract_space_key_from_overview_url(
+            "https://example.atlassian.net/wiki/spaces/~abc123/overview",
+        )
+        .expect("space key should be extracted");
+
+        assert_eq!(space_key, "~abc123");
+    }
+
+    #[test]
+    fn extracts_space_key_from_overview_url_with_trailing_slash() {
+        let space_key = extract_space_key_from_overview_url(
+            "https://example.atlassian.net/wiki/spaces/~abc123/overview/",
+        )
+        .expect("space key should be extracted");
+
+        assert_eq!(space_key, "~abc123");
     }
 
     #[test]

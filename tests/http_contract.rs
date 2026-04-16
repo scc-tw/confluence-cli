@@ -1,7 +1,7 @@
-use confluence_cli::AuthKind;
-use confluence_cli::ConfluenceCliError;
 use confluence_cli::domain::{CommentLocation, MoveTarget, PageId, PageRef};
 use confluence_cli::run_from;
+use confluence_cli::AuthKind;
+use confluence_cli::ConfluenceCliError;
 use confluence_cli::{AttachmentUploadRequest, CommentCreateRequest, MovePageRequest};
 use confluence_cli::{
     AttachmentsApi, CommentsApi, HttpApiConfig, HttpConfluenceApi, PageExportResult, PagesApi,
@@ -73,6 +73,32 @@ fn page_v1_with_key(
     })
 }
 
+fn page_v2_with_body(
+    id: u64,
+    title: &str,
+    space_id: &str,
+    body_key: &str,
+    body: &str,
+) -> serde_json::Value {
+    let mut body_value = serde_json::Map::new();
+    body_value.insert(
+        body_key.to_owned(),
+        json!({
+            "value": body,
+            "representation": body_key
+        }),
+    );
+
+    json!({
+        "id": id.to_string(),
+        "status": "current",
+        "title": title,
+        "spaceId": space_id,
+        "version": { "number": 3 },
+        "body": serde_json::Value::Object(body_value)
+    })
+}
+
 fn attachment_list_response(next: Option<&str>) -> serde_json::Value {
     json!({
         "results": [{
@@ -132,6 +158,148 @@ fn search_pages_cql_follows_next_links() {
     assert_eq!(pages.len(), 2);
     assert_eq!(pages[0].title, "Page One");
     assert_eq!(pages[1].title, "Page Two");
+}
+
+#[test]
+fn read_page_storage_uses_v2_page_endpoint() {
+    let server = MockServer::start();
+
+    let page = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/pages/855670887")
+            .query_param("body-format", "storage")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(page_v2_with_body(
+            855670887,
+            "ICU in Windows",
+            "100",
+            "storage",
+            "<p>Hello</p>",
+        ));
+    });
+
+    let api = HttpConfluenceApi::new(test_profile(&server)).expect("api should initialize");
+    let body = api
+        .read_page(
+            &PageRef::Url(format!(
+                "http://{}/wiki/spaces/ENG/pages/855670887/ICU+in+Windows",
+                server.address()
+            )),
+            confluence_cli::domain::BodyFormat::Storage,
+        )
+        .expect("page read should use v2 body-format endpoint");
+
+    page.assert();
+    assert_eq!(body.page.id, 855670887);
+    assert_eq!(body.content, "<p>Hello</p>");
+}
+
+#[test]
+fn read_page_resolves_space_overview_url_via_space_homepage() {
+    let server = MockServer::start();
+
+    let space = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/spaces")
+            .query_param("keys", "~7120202d4ccbf388e240f58d10c28a0d13083e")
+            .query_param("limit", "1")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "space-1",
+                "key": "~7120202d4ccbf388e240f58d10c28a0d13083e",
+                "name": "Oscar Yang",
+                "homepageId": "855670887"
+            }]
+        }));
+    });
+
+    let page = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/pages/855670887")
+            .query_param("body-format", "storage")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(page_v2_with_body(
+            855670887,
+            "Space Home",
+            "space-1",
+            "storage",
+            "<p>Overview</p>",
+        ));
+    });
+
+    let api = HttpConfluenceApi::new(test_profile(&server)).expect("api should initialize");
+    let body = api
+        .read_page(
+            &PageRef::Url(format!(
+                "http://{}/wiki/spaces/~7120202d4ccbf388e240f58d10c28a0d13083e/overview",
+                server.address()
+            )),
+            confluence_cli::domain::BodyFormat::Storage,
+        )
+        .expect("space overview should resolve to the space home page");
+
+    space.assert();
+    page.assert();
+    assert_eq!(body.page.id, 855670887);
+    assert_eq!(body.content, "<p>Overview</p>");
+}
+
+#[test]
+fn read_page_rejects_url_from_different_domain() {
+    let server = MockServer::start();
+    let api = HttpConfluenceApi::new(test_profile(&server)).expect("api should initialize");
+    let error = api
+        .read_page(
+            &PageRef::Url(
+                "https://other-site.atlassian.net/wiki/spaces/ENG/pages/855670887/ICU+in+Windows"
+                    .to_owned(),
+            ),
+            confluence_cli::domain::BodyFormat::Storage,
+        )
+        .expect_err("cross-domain URLs should be rejected");
+
+    match error {
+        ConfluenceCliError::Config(message) => {
+            assert!(message.contains("does not match the active profile domain"));
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+#[test]
+fn overview_lookup_failure_preserves_http_context() {
+    let server = MockServer::start();
+
+    let space = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/spaces")
+            .query_param("keys", "~7120202d4ccbf388e240f58d10c28a0d13083e")
+            .query_param("limit", "1")
+            .header("authorization", "Bearer token-123");
+        then.status(401)
+            .json_body(json!({"message":"Unauthorized"}));
+    });
+
+    let api = HttpConfluenceApi::new(test_profile(&server)).expect("api should initialize");
+    let error = api
+        .read_page(
+            &PageRef::Url(format!(
+                "http://{}/wiki/spaces/~7120202d4ccbf388e240f58d10c28a0d13083e/overview",
+                server.address()
+            )),
+            confluence_cli::domain::BodyFormat::Storage,
+        )
+        .expect_err("failed overview lookup should preserve the root cause");
+
+    space.assert();
+    match error {
+        ConfluenceCliError::Config(message) => {
+            assert!(message.contains("did not resolve to a home page"));
+            assert!(message.contains("HTTP error"));
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
 }
 
 #[test]
@@ -466,30 +634,17 @@ fn page_export_uses_page_info_body_and_attachment_requests() {
     let server = MockServer::start();
     let dir = tempdir().expect("tempdir should be created");
 
-    let page_info = server.mock(|when, then| {
+    let page_body = server.mock(|when, then| {
         when.method(GET)
             .path("/api/v2/pages/123")
+            .query_param("body-format", "storage")
             .header("authorization", "Bearer token-123");
         then.status(200).json_body(json!({
             "id": "123",
             "title": "Design Doc",
             "status": "current",
             "spaceId": "100",
-            "version": { "number": 5 }
-        }));
-    });
-
-    let page_body = server.mock(|when, then| {
-        when.method(GET)
-            .path("/wiki/rest/api/content/123")
-            .query_param("expand", "body.storage,version,space")
-            .header("authorization", "Bearer token-123");
-        then.status(200).json_body(json!({
-            "id": "123",
-            "title": "Design Doc",
-            "status": "current",
             "version": { "number": 5 },
-            "space": { "id": "100", "key": "ENG" },
             "body": { "storage": { "value": "<h1>Title</h1><p>Hello</p>" } }
         }));
     });
@@ -531,7 +686,6 @@ fn page_export_uses_page_info_body_and_attachment_requests() {
     )
     .expect("page export should succeed");
 
-    page_info.assert();
     page_body.assert();
     list_attachments.assert();
     attachment_metadata.assert();

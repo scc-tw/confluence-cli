@@ -4,7 +4,7 @@ use serde_json::Value;
 use crate::application::models::{AttachmentSummary, CommentSummary, ContentProperty, PageSummary};
 use crate::domain::CommentLocation;
 
-use super::{HttpConfluenceApi, parse_comment_location};
+use super::{parse_comment_location, HttpConfluenceApi};
 
 #[derive(Debug, Deserialize)]
 pub(super) struct SpacesResponse {
@@ -16,6 +16,8 @@ pub(super) struct SpaceV2 {
     pub(super) id: String,
     pub(super) key: String,
     pub(super) name: String,
+    #[serde(rename = "homepageId")]
+    pub(super) homepage_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -25,6 +27,7 @@ pub(super) struct PageV2 {
     pub(super) status: Option<String>,
     #[serde(rename = "spaceId")]
     pub(super) space_id: Option<String>,
+    pub(super) body: Option<PageBodyContainer>,
     pub(super) version: Option<PageVersion>,
 }
 
@@ -49,6 +52,12 @@ impl PageV2 {
             space_id: self.space_id,
             version: self.version.map(|version| version.number),
         }
+    }
+
+    pub(super) fn body_value(&self, format: &str) -> Option<String> {
+        let body = self.body.as_ref()?;
+        body.section(format)
+            .and_then(|section| section.value.clone())
     }
 }
 
@@ -104,6 +113,7 @@ pub(super) struct PageBodyContainer {
     pub(super) storage: Option<PageBodySection>,
     pub(super) view: Option<PageBodySection>,
     pub(super) export_view: Option<PageBodySection>,
+    pub(super) atlas_doc_format: Option<PageBodySection>,
 }
 
 impl PageBodyContainer {
@@ -112,6 +122,7 @@ impl PageBodyContainer {
             "storage" => self.storage.as_ref(),
             "view" => self.view.as_ref(),
             "export_view" => self.export_view.as_ref(),
+            "atlas_doc_format" => self.atlas_doc_format.as_ref(),
             _ => None,
         }
     }
