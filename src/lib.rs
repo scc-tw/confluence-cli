@@ -1,12 +1,26 @@
 pub mod api;
 pub mod app;
-pub mod cli;
+mod application;
+mod cli;
 pub mod config;
-pub mod convert;
+mod convert;
 pub mod domain;
-pub mod render;
-pub mod secret;
-pub mod support;
+mod infrastructure;
+mod profile;
+mod render;
+mod secret;
+mod support;
+
+pub use application::models::{
+    ArchiveResult, AttachmentSummary, AttachmentUploadRequest, CommentCreateRequest,
+    CommentSummary, ContentProperty, CreatePageRequest, MovePageRequest, PageBody, PageSummary,
+    SpaceSummary, UpdatePageRequest,
+};
+pub use application::runtime::{ResolveOptions, ResolvedProfile, RuntimeConfig};
+pub use config::ConfigSecretBackend;
+pub use profile::AuthKind;
+pub use secret::SecretBackend;
+pub use support::ConfluenceCliError;
 
 pub fn run() -> support::Result<()> {
     cli::run()

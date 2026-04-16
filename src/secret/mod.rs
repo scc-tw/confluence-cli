@@ -1,11 +1,18 @@
 use keyring::Entry;
+#[cfg(test)]
 use std::collections::HashMap;
+#[cfg(test)]
 use std::sync::Mutex;
 
-use crate::config::SecretBackend;
 use crate::support::{ConfluenceCliError, Result};
 
 const SERVICE_NAME: &str = "confluence-cli";
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SecretBackend {
+    Keyring,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SecretKind {
@@ -23,7 +30,6 @@ impl SecretKind {
 }
 
 pub trait SecretStore {
-    fn backend(&self) -> SecretBackend;
     fn get(&self, profile_id: &str, kind: SecretKind) -> Result<Option<String>>;
     fn set(&self, profile_id: &str, kind: SecretKind, value: &str) -> Result<()>;
     fn delete(&self, profile_id: &str, kind: SecretKind) -> Result<()>;
@@ -41,10 +47,6 @@ impl KeyringSecretStore {
 }
 
 impl SecretStore for KeyringSecretStore {
-    fn backend(&self) -> SecretBackend {
-        SecretBackend::Keyring
-    }
-
     fn get(&self, profile_id: &str, kind: SecretKind) -> Result<Option<String>> {
         let entry = self.entry(profile_id, kind)?;
         match entry.get_password() {
@@ -74,22 +76,21 @@ impl SecretStore for KeyringSecretStore {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, Default)]
 pub struct MemorySecretStore {
     values: Mutex<HashMap<(String, SecretKind), String>>,
 }
 
+#[cfg(test)]
 impl MemorySecretStore {
     pub fn new() -> Self {
         Self::default()
     }
 }
 
+#[cfg(test)]
 impl SecretStore for MemorySecretStore {
-    fn backend(&self) -> SecretBackend {
-        SecretBackend::Keyring
-    }
-
     fn get(&self, profile_id: &str, kind: SecretKind) -> Result<Option<String>> {
         Ok(self
             .values

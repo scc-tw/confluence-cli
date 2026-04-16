@@ -1,25 +1,15 @@
-use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use uuid::Uuid;
 
-use crate::secret::{SecretKind, SecretStore};
+use crate::profile::AuthKind;
 use crate::support::{ConfluenceCliError, Result};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum AuthKind {
-    Basic,
-    Bearer,
-    Mtls,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
-#[serde(rename_all = "lowercase")]
-pub enum SecretBackend {
+pub enum ConfigSecretBackend {
     Keyring,
 }
 
@@ -35,7 +25,7 @@ pub struct Profile {
     pub api_token: Option<String>,
     pub password: Option<String>,
     pub read_only: Option<bool>,
-    pub secret_backend: Option<SecretBackend>,
+    pub secret_backend: Option<ConfigSecretBackend>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -43,43 +33,6 @@ pub struct ConfigFile {
     pub active_profile: Option<String>,
     #[serde(default)]
     pub profiles: HashMap<String, Profile>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedProfile {
-    pub id: String,
-    pub name: Option<String>,
-    pub domain: String,
-    pub protocol: String,
-    pub api_path: String,
-    pub auth_type: AuthKind,
-    pub email: Option<String>,
-    pub username: Option<String>,
-    pub api_token: Option<String>,
-    pub password: Option<String>,
-    pub read_only: bool,
-    pub secret_backend: Option<SecretBackend>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolveOptions {
-    pub config_path: Option<PathBuf>,
-    pub profile: Option<String>,
-}
-
-impl ResolveOptions {
-    pub fn new(config_path: Option<PathBuf>, profile: Option<String>) -> Self {
-        Self {
-            config_path,
-            profile,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeConfig {
-    pub config: ConfigFile,
-    pub resolved_profile: Option<ResolvedProfile>,
 }
 
 pub fn load_config(path: &Path) -> Result<ConfigFile> {
@@ -112,40 +65,6 @@ pub fn default_config_path() -> PathBuf {
     PathBuf::from("config.json")
 }
 
-pub fn load_runtime(options: &ResolveOptions) -> Result<RuntimeConfig> {
-    load_runtime_with_store(options, None)
-}
-
-pub fn load_runtime_with_store(
-    options: &ResolveOptions,
-    secret_store: Option<&dyn SecretStore>,
-) -> Result<RuntimeConfig> {
-    let path = options
-        .config_path
-        .clone()
-        .unwrap_or_else(default_config_path);
-
-    let mut config = load_config(&path)?;
-    let profile_name = options
-        .profile
-        .clone()
-        .or_else(|| env::var("CONFLUENCE_PROFILE").ok())
-        .or_else(|| config.active_profile.clone());
-
-    let resolved_profile = if let Some(name) = profile_name.as_ref() {
-        let resolved = resolve_profile_with_store(&mut config, name, secret_store)?;
-        save_config(&path, &config)?;
-        Some(resolved)
-    } else {
-        None
-    };
-
-    Ok(RuntimeConfig {
-        config,
-        resolved_profile,
-    })
-}
-
 pub fn init_config(path: &Path, profile_name: &str, profile: Profile) -> Result<ConfigFile> {
     let mut config = ConfigFile {
         active_profile: Some(profile_name.to_owned()),
@@ -173,6 +92,13 @@ pub fn upsert_profile(
     }
     save_config(path, &config)?;
     Ok(config)
+}
+
+pub fn ensure_profile_id(mut profile: Profile) -> Profile {
+    if profile.id.is_none() {
+        profile.id = Some(uuid::Uuid::new_v4().to_string());
+    }
+    profile
 }
 
 pub fn set_active_profile(path: &Path, profile_name: &str) -> Result<ConfigFile> {
@@ -204,251 +130,13 @@ pub fn remove_profile(path: &Path, profile_name: &str) -> Result<ConfigFile> {
     Ok(config)
 }
 
-pub fn resolve_profile(config: &ConfigFile, profile_name: &str) -> Result<ResolvedProfile> {
-    let mut config = config.clone();
-    resolve_profile_with_store(&mut config, profile_name, None)
-}
-
-pub fn resolve_profile_with_store(
-    config: &mut ConfigFile,
-    profile_name: &str,
-    secret_store: Option<&dyn SecretStore>,
-) -> Result<ResolvedProfile> {
-    let profile = config
-        .profiles
-        .get(profile_name)
-        .ok_or_else(|| ConfluenceCliError::Config(format!("profile '{profile_name}' not found")))?;
-
-    let (resolved, migrated_profile) = resolve_from_profile(
-        Some(profile_name.to_owned()),
-        profile_name,
-        profile.clone(),
-        secret_store,
-    )?;
-
-    if let Some(profile) = migrated_profile {
-        config.profiles.insert(profile_name.to_owned(), profile);
-    }
-
-    Ok(resolved)
-}
-
-fn resolve_from_profile(
-    name: Option<String>,
-    profile_name: &str,
-    mut profile: Profile,
-    secret_store: Option<&dyn SecretStore>,
-) -> Result<(ResolvedProfile, Option<Profile>)> {
-    let id_was_missing = profile.id.is_none();
-    profile = ensure_profile_id(profile);
-    let profile_id = profile
-        .id
-        .clone()
-        .ok_or_else(|| ConfluenceCliError::Config("profile id missing".to_owned()))?;
-
-    let domain = env::var("CONFLUENCE_DOMAIN")
-        .ok()
-        .or_else(|| profile.domain.clone())
-        .ok_or_else(|| ConfluenceCliError::Config("missing Confluence domain".to_owned()))?;
-
-    let protocol = env::var("CONFLUENCE_PROTOCOL")
-        .ok()
-        .or_else(|| profile.protocol.clone())
-        .unwrap_or_else(|| "https".to_owned());
-
-    let api_path = env::var("CONFLUENCE_API_PATH")
-        .ok()
-        .or_else(|| profile.api_path.clone())
-        .unwrap_or_else(|| infer_api_path(&domain));
-
-    let auth_type = env::var("CONFLUENCE_AUTH_TYPE")
-        .ok()
-        .map(|raw| parse_auth_kind(&raw))
-        .transpose()?
-        .or_else(|| profile.auth_type.clone())
-        .unwrap_or(AuthKind::Basic);
-
-    let email = env::var("CONFLUENCE_EMAIL")
-        .ok()
-        .or_else(|| profile.email.clone());
-
-    let username = env::var("CONFLUENCE_USERNAME")
-        .ok()
-        .or_else(|| profile.username.clone());
-
-    let (api_token, api_token_migrated) = resolve_secret(
-        &profile_id,
-        profile_name,
-        profile.secret_backend.as_ref(),
-        SecretKind::ApiToken,
-        env::var("CONFLUENCE_API_TOKEN").ok(),
-        profile.api_token.clone(),
-        secret_store,
-    )?;
-
-    let (password, password_migrated) = resolve_secret(
-        &profile_id,
-        profile_name,
-        profile.secret_backend.as_ref(),
-        SecretKind::Password,
-        env::var("CONFLUENCE_PASSWORD").ok(),
-        profile.password.clone(),
-        secret_store,
-    )?;
-
-    let read_only = env::var("CONFLUENCE_READ_ONLY")
-        .ok()
-        .map(|value| parse_bool(&value))
-        .transpose()?
-        .or(profile.read_only)
-        .unwrap_or(false);
-
-    validate_auth(
-        &auth_type,
-        email.as_deref(),
-        username.as_deref(),
-        api_token.as_deref(),
-        password.as_deref(),
-    )?;
-
-    let migrated_profile = if id_was_missing || api_token_migrated || password_migrated {
-        if api_token_migrated {
-            profile.api_token = None;
-        }
-        if password_migrated {
-            profile.password = None;
-        }
-        profile.secret_backend = Some(SecretBackend::Keyring);
-        Some(profile.clone())
-    } else {
-        None
-    };
-
-    Ok((
-        ResolvedProfile {
-            id: profile_id,
-            name,
-            domain,
-            protocol,
-            api_path,
-            auth_type,
-            email,
-            username,
-            api_token,
-            password,
-            read_only,
-            secret_backend: profile.secret_backend.clone(),
-        },
-        migrated_profile,
-    ))
-}
-
-fn resolve_secret(
-    profile_id: &str,
-    profile_name: &str,
-    backend: Option<&SecretBackend>,
-    kind: SecretKind,
-    env_value: Option<String>,
-    legacy_value: Option<String>,
-    secret_store: Option<&dyn SecretStore>,
-) -> Result<(Option<String>, bool)> {
-    if let Some(value) = env_value {
-        return Ok((Some(value), false));
-    }
-
-    if matches!(backend, Some(SecretBackend::Keyring)) {
-        let store = secret_store.ok_or_else(|| {
-            ConfluenceCliError::Config(format!(
-                "profile '{profile_name}' expects keyring-backed secrets, but no secret store is configured"
-            ))
-        })?;
-
-        if let Some(value) = store.get(profile_id, kind)? {
-            return Ok((Some(value), false));
-        }
-    }
-
-    if let Some(value) = legacy_value {
-        if let Some(store) = secret_store {
-            store.set(profile_id, kind, &value)?;
-            return Ok((Some(value), true));
-        }
-
-        return Ok((Some(value), false));
-    }
-
-    Ok((None, false))
-}
-
-fn ensure_profile_id(mut profile: Profile) -> Profile {
-    if profile.id.is_none() {
-        profile.id = Some(Uuid::new_v4().to_string());
-    }
-    profile
-}
-
-fn infer_api_path(domain: &str) -> String {
-    if domain.ends_with(".atlassian.net") {
-        "/wiki/rest/api".to_owned()
-    } else {
-        "/rest/api".to_owned()
-    }
-}
-
-fn parse_auth_kind(value: &str) -> Result<AuthKind> {
-    match value.to_ascii_lowercase().as_str() {
-        "basic" => Ok(AuthKind::Basic),
-        "bearer" => Ok(AuthKind::Bearer),
-        "mtls" => Ok(AuthKind::Mtls),
-        other => Err(ConfluenceCliError::Config(format!(
-            "unsupported auth type '{other}'"
-        ))),
-    }
-}
-
-fn parse_bool(value: &str) -> Result<bool> {
-    match value.to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Ok(true),
-        "0" | "false" | "no" | "off" => Ok(false),
-        other => Err(ConfluenceCliError::Config(format!(
-            "unsupported boolean value '{other}'"
-        ))),
-    }
-}
-
-fn validate_auth(
-    auth_type: &AuthKind,
-    email: Option<&str>,
-    username: Option<&str>,
-    api_token: Option<&str>,
-    password: Option<&str>,
-) -> Result<()> {
-    match auth_type {
-        AuthKind::Basic => {
-            let has_identity = email.is_some() || username.is_some();
-            let has_secret = api_token.is_some() || password.is_some();
-            if !has_identity || !has_secret {
-                return Err(ConfluenceCliError::Config(
-                    "basic auth requires email/username and api token/password".to_owned(),
-                ));
-            }
-        }
-        AuthKind::Bearer => {
-            if api_token.is_none() {
-                return Err(ConfluenceCliError::Config(
-                    "bearer auth requires CONFLUENCE_API_TOKEN".to_owned(),
-                ));
-            }
-        }
-        AuthKind::Mtls => {}
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::runtime::ResolveOptions;
+    use crate::infrastructure::runtime_loader::{
+        load_runtime, load_runtime_with_store, resolve_profile_state, resolve_profile_with_store,
+    };
     use crate::secret::{MemorySecretStore, SecretKind, SecretStore};
     use std::sync::{Mutex, OnceLock};
     use tempfile::tempdir;
@@ -603,7 +291,7 @@ mod tests {
             ..Profile::default()
         };
 
-        let error = resolve_from_profile(Some("work".to_owned()), "work", profile, None)
+        let error = resolve_profile_state(Some("work".to_owned()), "work", profile, None)
             .expect_err("basic auth without token should fail");
 
         assert!(matches!(error, ConfluenceCliError::Config(_)));
@@ -730,7 +418,10 @@ mod tests {
             .get("work")
             .expect("profile should exist");
         assert!(profile_config.id.is_some());
-        assert_eq!(profile_config.secret_backend, Some(SecretBackend::Keyring));
+        assert_eq!(
+            profile_config.secret_backend,
+            Some(ConfigSecretBackend::Keyring)
+        );
         assert!(profile_config.api_token.is_none());
         let profile_id = profile_config
             .id
@@ -773,7 +464,7 @@ mod tests {
                 domain: Some("cycraft-corp.atlassian.net".to_owned()),
                 auth_type: Some(AuthKind::Bearer),
                 api_token: Some("token-file".to_owned()),
-                secret_backend: Some(SecretBackend::Keyring),
+                secret_backend: Some(ConfigSecretBackend::Keyring),
                 ..Profile::default()
             },
         );
