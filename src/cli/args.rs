@@ -4,6 +4,22 @@ use std::path::PathBuf;
 use crate::domain::{BodyFormat, CommentLocation, DeleteMode, PageRef};
 use crate::profile::AuthKind;
 
+const ROOT_AFTER_HELP: &str = "Quick start:\n  confluence login\n  confluence profile show\n  confluence page search \"release notes\"\n  confluence page info 12345\n  confluence page create --space-key ENG --title \"Draft\" --body \"# Hello\"\n  confluence shell\n\nDrill down:\n  confluence page --help\n  confluence page create --help\n  confluence profile --help\n  confluence shell --help";
+
+const SHELL_AFTER_HELP: &str = "Shell basics:\n  help\n  context\n  use profile work\n  use page 12345\n  use space-key ENG\n\nInside shell, keep using the same one-liner commands without the binary name:\n  page info\n  page search \"release notes\"\n  attachment list\n  property list\n  comment list\n\nType `help page` or `help page create` for command help.";
+
+const PROFILE_AFTER_HELP: &str = "Common profile flows:\n  confluence login\n  confluence profile list\n  confluence profile show\n  confluence profile use work\n  confluence profile add work --domain example.atlassian.net --auth-type bearer --api-token <token>";
+
+const PAGE_AFTER_HELP: &str = "Common page flows:\n  confluence page search \"release notes\"\n  confluence page search 'type=page and space=ENG' --cql\n  confluence page info 12345\n  confluence page read 12345 --format markdown\n  confluence page read https://your-site.atlassian.net/wiki/spaces/ENG/pages/12345/Page+Title\n  confluence page create --space-key ENG --title \"Draft\" --body \"# Hello\"\n  confluence page create-child 12345 --title \"Child\" --body \"# Hello\"\n  confluence page export 12345";
+
+const ATTACHMENT_AFTER_HELP: &str = "Common attachment flows:\n  confluence attachment list 12345\n  confluence attachment upload 12345 --file diagram.png\n  confluence attachment download 12345\n  confluence attachment delete 12345 diagram.png";
+
+const PROPERTY_AFTER_HELP: &str = "Common property flows:\n  confluence property list 12345\n  confluence property get 12345 owner\n  confluence property set 12345 owner --value '{\"team\":\"eng\"}'\n  confluence property delete 12345 owner";
+
+const COMMENT_AFTER_HELP: &str = "Common comment flows:\n  confluence comment list 12345\n  confluence comment create 12345 --body \"Looks good\"\n  confluence comment reply 12345 c-1 --body \"Ack\"\n  confluence comment resolve c-1\n  confluence comment reopen c-1";
+
+const CONVERT_AFTER_HELP: &str = "Local conversion examples:\n  confluence convert --from markdown --to storage --input \"# Hello\"\n  confluence convert --from storage --to markdown --input-file page.storage";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum CliAuthKind {
     Basic,
@@ -75,7 +91,12 @@ impl From<CliCommentLocation> for CommentLocation {
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "confluence", version, about = "Rust-first Confluence CLI")]
+#[command(
+    name = "confluence",
+    version,
+    about = "Confluence CLI for one-liners and interactive shell workflows",
+    after_help = ROOT_AFTER_HELP
+)]
 pub struct Cli {
     #[command(flatten)]
     pub global: GlobalArgs,
@@ -106,6 +127,8 @@ pub enum OutputFormat {
 pub enum Command {
     #[command(subcommand)]
     Config(ConfigCommand),
+    Login,
+    Shell(ShellCommand),
     #[command(subcommand)]
     Profile(ProfileCommand),
     #[command(subcommand)]
@@ -130,8 +153,10 @@ pub enum ConfigCommand {
 }
 
 #[derive(Debug, Subcommand)]
+#[command(after_help = PROFILE_AFTER_HELP)]
 pub enum ProfileCommand {
     List,
+    Show,
     Use {
         name: String,
     },
@@ -146,6 +171,14 @@ pub enum ProfileCommand {
         name: String,
     },
 }
+
+#[derive(Debug, Clone, Args, Default)]
+#[command(
+    about = "Start an interactive Confluence shell",
+    long_about = "Start an interactive Confluence shell that keeps the same command grammar as the one-liner CLI while adding shell-local context and help.",
+    after_help = SHELL_AFTER_HELP
+)]
+pub struct ShellCommand {}
 
 #[derive(Debug, Clone, Args, Default)]
 pub struct ProfileArgs {
@@ -170,6 +203,7 @@ pub struct ProfileArgs {
 }
 
 #[derive(Debug, Subcommand)]
+#[command(after_help = PAGE_AFTER_HELP)]
 pub enum PageCommand {
     Read {
         page: PageRef,
@@ -179,9 +213,11 @@ pub enum PageCommand {
     Info {
         page: PageRef,
     },
+    #[command(about = "Quick page lookup by title or text")]
     Find {
         title: String,
     },
+    #[command(about = "Search pages by text, or pass raw CQL with --cql")]
     Search {
         query: String,
         #[arg(long)]
@@ -190,6 +226,7 @@ pub enum PageCommand {
     Children {
         page: PageRef,
     },
+    #[command(about = "Create a page in a space")]
     Create {
         #[arg(long)]
         title: String,
@@ -204,6 +241,7 @@ pub enum PageCommand {
         #[arg(long)]
         space_key: Option<String>,
     },
+    #[command(about = "Create a child page under an existing page")]
     CreateChild {
         parent: PageRef,
         #[arg(long)]
@@ -215,6 +253,7 @@ pub enum PageCommand {
         #[arg(long, value_enum, default_value_t = CliBodyFormat::Markdown)]
         body_format: CliBodyFormat,
     },
+    #[command(about = "Update a page using explicit storage body and version")]
     Update {
         page: PageRef,
         #[arg(long)]
@@ -224,6 +263,7 @@ pub enum PageCommand {
         #[arg(long)]
         version: u32,
     },
+    #[command(about = "Apply a unified patch to a page using a saved base file")]
     Patch {
         page: PageRef,
         #[arg(long)]
@@ -233,6 +273,7 @@ pub enum PageCommand {
         #[arg(long)]
         dry_run: bool,
     },
+    #[command(about = "Move a page to a new parent or reorder it before/after another page")]
     Move {
         page: PageRef,
         #[arg(long)]
@@ -247,6 +288,7 @@ pub enum PageCommand {
     Archive {
         page: PageRef,
     },
+    #[command(about = "Delete a page using archive, trash, or purge mode")]
     Delete {
         page: PageRef,
         #[arg(long, value_enum, default_value_t = CliDeleteMode::Archive)]
@@ -266,6 +308,7 @@ pub enum PageCommand {
 }
 
 #[derive(Debug, Subcommand)]
+#[command(after_help = ATTACHMENT_AFTER_HELP)]
 pub enum AttachmentCommand {
     List {
         page: PageRef,
@@ -293,6 +336,7 @@ pub enum AttachmentCommand {
 }
 
 #[derive(Debug, Subcommand)]
+#[command(after_help = PROPERTY_AFTER_HELP)]
 pub enum PropertyCommand {
     List {
         page: PageRef,
@@ -316,6 +360,7 @@ pub enum PropertyCommand {
 }
 
 #[derive(Debug, Subcommand)]
+#[command(after_help = COMMENT_AFTER_HELP)]
 pub enum CommentCommand {
     List {
         page: PageRef,
@@ -370,6 +415,7 @@ pub enum CommentCommand {
 }
 
 #[derive(Debug, Args)]
+#[command(after_help = CONVERT_AFTER_HELP)]
 pub struct ConvertCommand {
     #[arg(long, value_enum)]
     pub from: CliBodyFormat,
