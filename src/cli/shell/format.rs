@@ -48,14 +48,16 @@ pub fn render_file(path: &str, handle: &NodeHandle, stat: &NodeStat) -> String {
 
 fn render_entry(entry: &DirEntry) -> String {
     match &entry.handle {
-        NodeHandle::Space(space) => format!("{}/", space.name),
+        NodeHandle::Space(space) => format!("{}{}", quote_if_needed(&space.name), "/"),
         NodeHandle::Page(page) => {
-            let suffix = if entry.stat.has_children == Some(true) {
+            let suffix = if entry.stat.has_children == Some(true)
+                || matches!(entry.stat.kind, NodeKind::Folder)
+            {
                 "/"
             } else {
                 ""
             };
-            format!("{}{}", page.title, suffix)
+            format!("{}{}", quote_if_needed(&page.title), suffix)
         }
         NodeHandle::Root => "/".to_owned(),
     }
@@ -108,9 +110,13 @@ fn render_entry_with_context(entry: &DirEntry, all_entries: &[DirEntry]) -> Stri
                 })
                 .count();
             if duplicate_name_count > 1 {
-                format!("{}({})/", space.name, space.key)
+                format!(
+                    "{}{}",
+                    quote_if_needed(&format!("{} ({})", space.name, space.key)),
+                    "/"
+                )
             } else {
-                format!("{}/", space.name)
+                format!("{}{}", quote_if_needed(&space.name), "/")
             }
         }
         _ => render_entry(entry),
@@ -132,7 +138,7 @@ fn render_entry_long(entry: &DirEntry) -> String {
             render_kind(entry.stat.kind),
             render_capabilities(&entry.stat.capabilities),
             page.id,
-            page.title
+            quote_if_needed(&page.title)
         ),
         NodeHandle::Root => "root  list,traverse      -          /".to_owned(),
     }
@@ -143,6 +149,15 @@ fn render_kind(kind: NodeKind) -> &'static str {
         NodeKind::Root => "root",
         NodeKind::Space => "space",
         NodeKind::Page => "page",
+        NodeKind::Folder => "folder",
+    }
+}
+
+fn quote_if_needed(name: &str) -> String {
+    if name.chars().any(|ch| ch.is_whitespace()) {
+        format!("{:?}", name)
+    } else {
+        name.to_owned()
     }
 }
 
@@ -179,16 +194,23 @@ mod tests {
             space("BETA", "Workspace Beta"),
         ];
         let rendered = render_listing(&entries, ListingStyle::Simple, Some(30));
-        assert!(rendered.contains("Workspace Alpha/"));
-        assert!(rendered.contains("Workspace Beta/"));
+        assert!(rendered.contains("\"Workspace Alpha\"/"));
+        assert!(rendered.contains("\"Workspace Beta\"/"));
     }
 
     #[test]
     fn space_listing_appends_key_when_names_conflict() {
         let entries = vec![space("ALPHA", "Workspace"), space("BETA", "Workspace")];
         let rendered = render_listing(&entries, ListingStyle::Simple, Some(60));
-        assert!(rendered.contains("Workspace(ALPHA)/"));
-        assert!(rendered.contains("Workspace(BETA)/"));
+        assert!(rendered.contains("\"Workspace (ALPHA)\"/"));
+        assert!(rendered.contains("\"Workspace (BETA)\"/"));
+    }
+
+    #[test]
+    fn page_listing_quotes_whitespace_names() {
+        let entries = vec![page("The Unicode Handling in Modern C++")];
+        let rendered = render_listing(&entries, ListingStyle::Simple, Some(120));
+        assert!(rendered.contains("\"The Unicode Handling in Modern C++\""));
     }
 
     fn page(title: &str) -> DirEntry {
@@ -198,6 +220,7 @@ mod tests {
                 id: 1,
                 title: title.to_owned(),
                 space_id: Some("100".to_owned()),
+                content_kind: crate::application::models::PageContentKind::Page,
             }),
             stat: NodeStat {
                 kind: NodeKind::Page,

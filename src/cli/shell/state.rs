@@ -1,3 +1,4 @@
+use crate::application::runtime::{ResolvedProfile, RuntimeContext};
 use crate::application::vfs::{NodeHandle, VirtualFileSystem};
 use crate::support::Result;
 use crate::GlobalArgs;
@@ -6,14 +7,20 @@ use super::super::bootstrap::load_runtime_and_vfs;
 
 pub struct ShellState {
     global: GlobalArgs,
+    resolved_profile: Option<ResolvedProfile>,
     vfs: Box<dyn VirtualFileSystem>,
     lineage: Vec<NodeHandle>,
 }
 
 impl ShellState {
-    pub fn new(global: GlobalArgs, vfs: Box<dyn VirtualFileSystem>) -> Self {
+    pub fn new(
+        global: GlobalArgs,
+        runtime: RuntimeContext,
+        vfs: Box<dyn VirtualFileSystem>,
+    ) -> Self {
         Self {
             global,
+            resolved_profile: runtime.runtime_config.resolved_profile,
             lineage: vec![vfs.root()],
             vfs,
         }
@@ -56,6 +63,10 @@ impl ShellState {
 
     pub fn global(&self) -> &GlobalArgs {
         &self.global
+    }
+
+    pub fn resolved_profile(&self) -> Option<&ResolvedProfile> {
+        self.resolved_profile.as_ref()
     }
 
     pub fn resolve_listing_target(&self, target: Option<&str>) -> Result<NodeHandle> {
@@ -114,7 +125,8 @@ impl ShellState {
 
     pub fn use_profile(&mut self, profile: String) -> Result<()> {
         self.global.profile = Some(profile);
-        let (_, vfs) = load_runtime_and_vfs(&self.global)?;
+        let (runtime, vfs) = load_runtime_and_vfs(&self.global)?;
+        self.resolved_profile = runtime.runtime_config.resolved_profile;
         self.vfs = vfs;
         self.lineage = vec![self.vfs.root()];
         Ok(())

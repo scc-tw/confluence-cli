@@ -137,8 +137,74 @@ fn shell_root_ls_lists_spaces() {
         .expect("shell output should be captured");
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
-    assert!(stdout.contains("Workspace Alpha/"));
+    assert!(stdout.contains("\"Workspace Alpha\"/"));
     spaces.assert();
+}
+
+#[test]
+fn shell_ls_marks_folder_nodes() {
+    let server = MockServer::start();
+    let dir = tempdir().expect("tempdir should be created");
+    let config_path = dir.path().join("config.json");
+    write_minimal_config(&config_path);
+
+    let spaces = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/spaces")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "100",
+                "key": "ALPHA",
+                "name": "Workspace Alpha",
+                "homepageId": "1"
+            }]
+        }));
+    });
+
+    let root_children = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/pages/1/direct-children")
+            .query_param("limit", "100")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "950304787",
+                "status": "current",
+                "title": "Reference Docs",
+                "type": "folder",
+                "spaceId": "100",
+                "version": { "number": 1 }
+            }]
+        }));
+    });
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_confluence"));
+    configure_command(&mut command, &config_path, &server);
+    let mut child = command
+        .arg("shell")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("shell should start");
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should exist")
+        .write_all(b"cd ALPHA\nls\nfile 950304787\nstat 950304787\nexit\n")
+        .expect("shell input should be written");
+
+    let output = child
+        .wait_with_output()
+        .expect("shell output should be captured");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("\"Reference Docs\"/"));
+    assert!(stdout.contains("kind: folder"));
+    assert!(stdout.contains("caps: list,traverse,search,create"));
+    spaces.assert();
+    root_children.assert_hits(3);
 }
 
 #[test]
@@ -164,7 +230,7 @@ fn shell_cd_space_then_ls_lists_homepage_children() {
 
     let homepage_children = server.mock(|when, then| {
         when.method(GET)
-            .path("/api/v2/pages/1/children")
+            .path("/api/v2/pages/1/direct-children")
             .query_param("limit", "100")
             .header("authorization", "Bearer token-123");
         then.status(200).json_body(json!({
@@ -238,7 +304,7 @@ fn shell_ls_accepts_page_id_target() {
 
     let homepage_children = server.mock(|when, then| {
         when.method(GET)
-            .path("/api/v2/pages/1/children")
+            .path("/api/v2/pages/1/direct-children")
             .query_param("limit", "100")
             .header("authorization", "Bearer token-123");
         then.status(200).json_body(json!({
@@ -254,7 +320,7 @@ fn shell_ls_accepts_page_id_target() {
 
     let target_children = server.mock(|when, then| {
         when.method(GET)
-            .path("/api/v2/pages/18548718/children")
+            .path("/api/v2/pages/18548718/direct-children")
             .query_param("limit", "100")
             .header("authorization", "Bearer token-123");
         then.status(200).json_body(json!({
@@ -318,7 +384,7 @@ fn shell_ls_accepts_quoted_page_title_target() {
 
     let homepage_children = server.mock(|when, then| {
         when.method(GET)
-            .path("/api/v2/pages/1/children")
+            .path("/api/v2/pages/1/direct-children")
             .query_param("limit", "100")
             .header("authorization", "Bearer token-123");
         then.status(200).json_body(json!({
@@ -334,7 +400,7 @@ fn shell_ls_accepts_quoted_page_title_target() {
 
     let target_children = server.mock(|when, then| {
         when.method(GET)
-            .path("/api/v2/pages/18548718/children")
+            .path("/api/v2/pages/18548718/direct-children")
             .query_param("limit", "100")
             .header("authorization", "Bearer token-123");
         then.status(200).json_body(json!({
@@ -398,7 +464,7 @@ fn shell_cd_page_then_page_info_uses_current_page() {
 
     let homepage_children = server.mock(|when, then| {
         when.method(GET)
-            .path("/api/v2/pages/1/children")
+            .path("/api/v2/pages/1/direct-children")
             .query_param("limit", "100")
             .header("authorization", "Bearer token-123");
         then.status(200).json_body(json!({
@@ -540,7 +606,7 @@ fn shell_page_create_from_inside_page_does_not_inherit_space_context() {
 
     let homepage_children = server.mock(|when, then| {
         when.method(GET)
-            .path("/api/v2/pages/1/children")
+            .path("/api/v2/pages/1/direct-children")
             .query_param("limit", "100")
             .header("authorization", "Bearer token-123");
         then.status(200).json_body(json!({
@@ -603,7 +669,7 @@ fn shell_cd_reports_ambiguous_page_titles() {
 
     let homepage_children = server.mock(|when, then| {
         when.method(GET)
-            .path("/api/v2/pages/1/children")
+            .path("/api/v2/pages/1/direct-children")
             .query_param("limit", "100")
             .header("authorization", "Bearer token-123");
         then.status(200).json_body(json!({
@@ -721,7 +787,7 @@ fn shell_cat_reads_current_page_text() {
 
     let homepage_children = server.mock(|when, then| {
         when.method(GET)
-            .path("/api/v2/pages/1/children")
+            .path("/api/v2/pages/1/direct-children")
             .query_param("limit", "100")
             .header("authorization", "Bearer token-123");
         then.status(200).json_body(json!({
@@ -806,7 +872,7 @@ fn shell_cat_raw_outputs_storage_body() {
 
     let homepage_children = server.mock(|when, then| {
         when.method(GET)
-            .path("/api/v2/pages/1/children")
+            .path("/api/v2/pages/1/direct-children")
             .query_param("limit", "100")
             .header("authorization", "Bearer token-123");
         then.status(200).json_body(json!({
@@ -890,7 +956,7 @@ fn shell_find_walks_subtree() {
 
     let root_children = server.mock(|when, then| {
         when.method(GET)
-            .path("/api/v2/pages/1/children")
+            .path("/api/v2/pages/1/direct-children")
             .query_param("limit", "100")
             .header("authorization", "Bearer token-123");
         then.status(200).json_body(json!({
@@ -906,7 +972,7 @@ fn shell_find_walks_subtree() {
 
     let nested_children = server.mock(|when, then| {
         when.method(GET)
-            .path("/api/v2/pages/2/children")
+            .path("/api/v2/pages/2/direct-children")
             .query_param("limit", "100")
             .header("authorization", "Bearer token-123");
         then.status(200).json_body(json!({
@@ -922,7 +988,7 @@ fn shell_find_walks_subtree() {
 
     let leaf_children = server.mock(|when, then| {
         when.method(GET)
-            .path("/api/v2/pages/3/children")
+            .path("/api/v2/pages/3/direct-children")
             .query_param("limit", "100")
             .header("authorization", "Bearer token-123");
         then.status(200).json_body(json!({ "results": [] }));
@@ -981,7 +1047,7 @@ fn shell_grep_searches_subtree() {
 
     let root_children = server.mock(|when, then| {
         when.method(GET)
-            .path("/api/v2/pages/1/children")
+            .path("/api/v2/pages/1/direct-children")
             .query_param("limit", "100")
             .header("authorization", "Bearer token-123");
         then.status(200).json_body(json!({
@@ -997,7 +1063,7 @@ fn shell_grep_searches_subtree() {
 
     let nested_children = server.mock(|when, then| {
         when.method(GET)
-            .path("/api/v2/pages/2/children")
+            .path("/api/v2/pages/2/direct-children")
             .query_param("limit", "100")
             .header("authorization", "Bearer token-123");
         then.status(200).json_body(json!({
@@ -1013,7 +1079,7 @@ fn shell_grep_searches_subtree() {
 
     let leaf_children = server.mock(|when, then| {
         when.method(GET)
-            .path("/api/v2/pages/3/children")
+            .path("/api/v2/pages/3/direct-children")
             .query_param("limit", "100")
             .header("authorization", "Bearer token-123");
         then.status(200).json_body(json!({ "results": [] }));
@@ -1112,7 +1178,7 @@ fn shell_pipeline_ls_into_grep_filters_listing() {
 
     let root_children = server.mock(|when, then| {
         when.method(GET)
-            .path("/api/v2/pages/1/children")
+            .path("/api/v2/pages/1/direct-children")
             .query_param("limit", "100")
             .header("authorization", "Bearer token-123");
         then.status(200).json_body(json!({
@@ -1185,7 +1251,7 @@ fn shell_ls_long_shows_kind_and_capabilities() {
 
     let root_children = server.mock(|when, then| {
         when.method(GET)
-            .path("/api/v2/pages/1/children")
+            .path("/api/v2/pages/1/direct-children")
             .query_param("limit", "100")
             .header("authorization", "Bearer token-123");
         then.status(200).json_body(json!({
@@ -1250,7 +1316,7 @@ fn shell_file_shows_kind_capabilities_and_path() {
 
     let root_children = server.mock(|when, then| {
         when.method(GET)
-            .path("/api/v2/pages/1/children")
+            .path("/api/v2/pages/1/direct-children")
             .query_param("limit", "100")
             .header("authorization", "Bearer token-123");
         then.status(200).json_body(json!({
@@ -1291,6 +1357,318 @@ fn shell_file_shows_kind_capabilities_and_path() {
     assert!(stdout.contains("id: 2"));
     spaces.assert();
     root_children.assert();
+}
+
+#[test]
+fn shell_stat_shows_kind_capabilities_and_path() {
+    let server = MockServer::start();
+    let dir = tempdir().expect("tempdir should be created");
+    let config_path = dir.path().join("config.json");
+    write_minimal_config(&config_path);
+
+    let spaces = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/spaces")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "100",
+                "key": "ALPHA",
+                "name": "Workspace Alpha",
+                "homepageId": "1"
+            }]
+        }));
+    });
+
+    let root_children = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/pages/1/direct-children")
+            .query_param("limit", "100")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "2",
+                "status": "current",
+                "title": "People Docs",
+                "spaceId": "100",
+                "version": { "number": 1 }
+            }]
+        }));
+    });
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_confluence"));
+    configure_command(&mut command, &config_path, &server);
+    let mut child = command
+        .arg("shell")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("shell should start");
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should exist")
+        .write_all(b"stat ALPHA/2\nexit\n")
+        .expect("shell input should be written");
+
+    let output = child
+        .wait_with_output()
+        .expect("shell output should be captured");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("path: /ALPHA/People Docs"));
+    assert!(stdout.contains("kind: page"));
+    assert!(stdout.contains("caps: read,list,traverse"));
+    spaces.assert();
+    root_children.assert();
+}
+
+#[test]
+fn shell_whoami_uses_resolved_profile_identity() {
+    let server = MockServer::start();
+    let dir = tempdir().expect("tempdir should be created");
+    let config_path = dir.path().join("config.json");
+    write_minimal_config(&config_path);
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_confluence"));
+    configure_command(&mut command, &config_path, &server);
+    command
+        .env("CONFLUENCE_EMAIL", "user.alpha@example.test")
+        .env("CONFLUENCE_DOMAIN", "example.atlassian.net")
+        .env("CONFLUENCE_PROTOCOL", "https")
+        .env("CONFLUENCE_API_PATH", "/wiki/rest/api")
+        .env("CONFLUENCE_AUTH_TYPE", "bearer")
+        .env("CONFLUENCE_API_TOKEN", "token-123");
+    let mut child = command
+        .arg("shell")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("shell should start");
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should exist")
+        .write_all(b"whoami\nexit\n")
+        .expect("shell input should be written");
+
+    let output = child
+        .wait_with_output()
+        .expect("shell output should be captured");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("user.alpha@example.test"));
+}
+
+#[test]
+fn shell_seq_prints_numeric_sequence() {
+    let server = MockServer::start();
+    let dir = tempdir().expect("tempdir should be created");
+    let config_path = dir.path().join("config.json");
+    write_minimal_config(&config_path);
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_confluence"));
+    configure_command(&mut command, &config_path, &server);
+    let mut child = command
+        .arg("shell")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("shell should start");
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should exist")
+        .write_all(b"seq 1 2 5\nexit\n")
+        .expect("shell input should be written");
+
+    let output = child
+        .wait_with_output()
+        .expect("shell output should be captured");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("1\n3\n5"));
+}
+
+#[test]
+fn shell_sleep_accepts_zero_duration() {
+    let server = MockServer::start();
+    let dir = tempdir().expect("tempdir should be created");
+    let config_path = dir.path().join("config.json");
+    write_minimal_config(&config_path);
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_confluence"));
+    configure_command(&mut command, &config_path, &server);
+    let mut child = command
+        .arg("shell")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("shell should start");
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should exist")
+        .write_all(b"sleep 0s\nexit\n")
+        .expect("shell input should be written");
+
+    let output = child
+        .wait_with_output()
+        .expect("shell output should be captured");
+    assert!(output.status.success());
+}
+
+#[test]
+fn shell_tail_reads_current_page_text() {
+    let server = MockServer::start();
+    let dir = tempdir().expect("tempdir should be created");
+    let config_path = dir.path().join("config.json");
+    write_minimal_config(&config_path);
+
+    let spaces = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/spaces")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "100",
+                "key": "ALPHA",
+                "name": "Workspace Alpha",
+                "homepageId": "1"
+            }]
+        }));
+    });
+
+    let homepage_children = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/pages/1/direct-children")
+            .query_param("limit", "100")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "2",
+                "status": "current",
+                "title": "People Docs",
+                "type": "page",
+                "spaceId": "100",
+                "version": { "number": 1 }
+            }]
+        }));
+    });
+
+    let page = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/pages/2")
+            .query_param("body-format", "storage")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "id": "2",
+            "status": "current",
+            "title": "People Docs",
+            "type": "page",
+            "spaceId": "100",
+            "version": { "number": 1 },
+            "body": {
+                "storage": {
+                    "value": "<p>Line 1</p><p>Line 2</p><p>Line 3</p>",
+                    "representation": "storage"
+                }
+            }
+        }));
+    });
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_confluence"));
+    configure_command(&mut command, &config_path, &server);
+    let mut child = command
+        .arg("shell")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("shell should start");
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should exist")
+        .write_all(b"cd ALPHA\ncd 2\ntail -n 2\nexit\n")
+        .expect("shell input should be written");
+
+    let output = child
+        .wait_with_output()
+        .expect("shell output should be captured");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("Line 2"));
+    assert!(stdout.contains("Line 3"));
+    spaces.assert();
+    homepage_children.assert();
+    page.assert();
+}
+
+#[test]
+fn shell_tail_accepts_piped_input() {
+    let server = MockServer::start();
+    let dir = tempdir().expect("tempdir should be created");
+    let config_path = dir.path().join("config.json");
+    write_minimal_config(&config_path);
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_confluence"));
+    configure_command(&mut command, &config_path, &server);
+    let mut child = command
+        .arg("shell")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("shell should start");
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should exist")
+        .write_all(b"seq 1 6 | tail -n 2\nexit\n")
+        .expect("shell input should be written");
+
+    let output = child
+        .wait_with_output()
+        .expect("shell output should be captured");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("5\n6"));
+}
+
+#[test]
+fn shell_tail_rejects_piped_input_with_explicit_target() {
+    let server = MockServer::start();
+    let dir = tempdir().expect("tempdir should be created");
+    let config_path = dir.path().join("config.json");
+    write_minimal_config(&config_path);
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_confluence"));
+    configure_command(&mut command, &config_path, &server);
+    let mut child = command
+        .arg("shell")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("shell should start");
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should exist")
+        .write_all(b"seq 1 6 | tail -n 2 ALPHA/2\nexit\n")
+        .expect("shell input should be written");
+
+    let output = child
+        .wait_with_output()
+        .expect("shell output should be captured");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("tail does not accept both piped input and an explicit target"));
 }
 
 #[test]
@@ -1438,8 +1816,13 @@ fn shell_help_shows_filesystem_commands() {
     assert!(stdout.contains("ls"));
     assert!(stdout.contains("ls -l"));
     assert!(stdout.contains("file SPACE/12345"));
+    assert!(stdout.contains("stat SPACE/12345"));
     assert!(stdout.contains("clear"));
     assert!(stdout.contains("cat [--raw|--text|--markdown|--html] [target]"));
+    assert!(stdout.contains("tail -n 5 [target]"));
+    assert!(stdout.contains("whoami"));
+    assert!(stdout.contains("seq 1 5"));
+    assert!(stdout.contains("sleep 1s"));
     assert!(stdout.contains("grep <pattern> [target]"));
     assert!(stdout.contains("find [target] [--name <pattern>]"));
     assert!(stdout.contains("cd SPACE"));

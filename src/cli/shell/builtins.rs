@@ -13,6 +13,7 @@ pub fn resolve(name: &str) -> Option<Builtin> {
         "pwd" => Some(Builtin::Pwd),
         "ls" => Some(Builtin::Ls),
         "file" => Some(Builtin::File),
+        "stat" => Some(Builtin::Stat),
         "clear" | "cls" => Some(Builtin::Clear),
         "cd" => Some(Builtin::Cd),
         "use" => Some(Builtin::UseProfile),
@@ -29,6 +30,7 @@ pub enum Builtin {
     Pwd,
     Ls,
     File,
+    Stat,
     Clear,
     Cd,
     UseProfile,
@@ -70,6 +72,16 @@ pub fn execute(
         }
         Builtin::File => {
             require_range("file", argv, 1, 2)?;
+            let lineage = state.resolve_target_lineage(argv.get(1).map(String::as_str))?;
+            let handle = lineage.last().expect("lineage always has a node");
+            let stat = state.vfs().stat(handle)?;
+            Ok((
+                ShellControl::Continue,
+                CommandOutput::Text(render_file(&state.render_lineage(&lineage), handle, &stat)),
+            ))
+        }
+        Builtin::Stat => {
+            require_range("stat", argv, 1, 2)?;
             let lineage = state.resolve_target_lineage(argv.get(1).map(String::as_str))?;
             let handle = lineage.last().expect("lineage always has a node");
             let stat = state.vfs().stat(handle)?;
@@ -182,6 +194,7 @@ fn usage_for(command: &str) -> String {
         "pwd" => "pwd".to_owned(),
         "ls" => "ls [target]".to_owned(),
         "file" => "file [target]".to_owned(),
+        "stat" => "stat [target]".to_owned(),
         "clear" => "clear".to_owned(),
         "cd" => "cd <space|page|..|/>".to_owned(),
         "help" => "help [topic]".to_owned(),
