@@ -38,3 +38,23 @@ pub fn execute(
         _ => unreachable!("checked by registry before dispatch"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{help_for, is_registered};
+
+    #[test]
+    fn registry_knows_shell_native_commands() {
+        assert!(is_registered("cat"));
+        assert!(is_registered("grep"));
+        assert!(is_registered("find"));
+        assert!(!is_registered("page"));
+    }
+
+    #[test]
+    fn help_entries_exist_for_registered_commands() {
+        assert!(help_for("cat").unwrap().contains("markdown"));
+        assert!(help_for("grep").unwrap().contains("pattern"));
+        assert!(help_for("find").unwrap().contains("--name"));
+    }
+}
