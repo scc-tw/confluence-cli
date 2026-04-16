@@ -1,12 +1,16 @@
 use clap::Parser;
+use std::io::{BufRead, Write};
 
 use crate::support::Result;
+use crate::{application::runtime::RuntimeContext, secret::SecretStore, ResolveOptions};
 
 mod args;
 mod bootstrap;
 mod dispatch;
 mod input;
 mod output;
+mod prompt;
+mod shell;
 
 pub use args::*;
 
@@ -21,6 +25,41 @@ where
 {
     let cli = Cli::parse_from(args);
     dispatch::dispatch(cli)
+}
+
+pub(crate) fn try_run_from<I, T>(args: I) -> std::result::Result<(), String>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+{
+    match Cli::try_parse_from(args) {
+        Ok(cli) => dispatch::dispatch(cli).map_err(|error| error.to_string()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+pub(crate) fn login_with_store_and_io<R: BufRead, W: Write>(
+    global: &GlobalArgs,
+    reader: &mut R,
+    writer: &mut W,
+    store: &dyn SecretStore,
+) -> Result<()> {
+    bootstrap::login_with_store_and_io(global, reader, writer, store)
+}
+
+pub(crate) fn profile_show_with_store<W: Write>(
+    global: &GlobalArgs,
+    store: &dyn SecretStore,
+    writer: &mut W,
+) -> Result<()> {
+    bootstrap::profile_show_with_store(global, store, writer)
+}
+
+pub(crate) fn load_runtime_context_with_store(
+    options: &ResolveOptions,
+    store: &dyn SecretStore,
+) -> Result<RuntimeContext> {
+    bootstrap::load_runtime_context_with_store(options, store)
 }
 
 #[cfg(test)]
@@ -40,6 +79,27 @@ mod tests {
             cli.command,
             Command::Profile(ProfileCommand::List)
         ));
+    }
+
+    #[test]
+    fn parses_profile_show_command() {
+        let cli = Cli::parse_from(["confluence", "profile", "show"]);
+        assert!(matches!(
+            cli.command,
+            Command::Profile(ProfileCommand::Show)
+        ));
+    }
+
+    #[test]
+    fn parses_top_level_login_command() {
+        let cli = Cli::parse_from(["confluence", "login"]);
+        assert!(matches!(cli.command, Command::Login));
+    }
+
+    #[test]
+    fn parses_top_level_shell_command() {
+        let cli = Cli::parse_from(["confluence", "shell"]);
+        assert!(matches!(cli.command, Command::Shell(_)));
     }
 
     #[test]

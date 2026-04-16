@@ -7,11 +7,16 @@ mod property;
 use crate::support::Result;
 
 use super::args::{Cli, Command};
-use super::bootstrap::{config_init, profile_add, profile_list, profile_remove, profile_use};
+use super::bootstrap::{
+    config_init, login, profile_add, profile_list, profile_remove, profile_show, profile_use,
+};
 
 pub(super) fn dispatch(cli: Cli) -> Result<()> {
     match cli.command {
+        Command::Shell(_) => super::shell::run(&cli.global),
+        Command::Login => login(&cli.global),
         Command::Profile(super::args::ProfileCommand::List) => profile_list(&cli.global),
+        Command::Profile(super::args::ProfileCommand::Show) => profile_show(&cli.global),
         Command::Config(super::args::ConfigCommand::Init { name, profile }) => {
             config_init(&cli.global, &name, profile)
         }
