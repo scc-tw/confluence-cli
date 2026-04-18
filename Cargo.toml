@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.94"
 description = "A Rust-first Confluence CLI focused on safe content workflows"
+license = "MIT"
+repository = "https://github.com/scc-tw/confluence-cli"
+readme = "README.md"
+keywords = ["confluence", "cli", "atlassian", "shell", "vfs"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "confluence"

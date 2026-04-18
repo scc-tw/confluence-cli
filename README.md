@@ -30,6 +30,101 @@ Compiled binary:
 target\debug\confluence --help
 ```
 
+## Support matrix
+
+Official GitHub Release binaries are planned for these targets:
+
+| OS | Architecture | Target triple | Status |
+|---|---|---|---|
+| Windows | x64 | `x86_64-pc-windows-msvc` | supported |
+| Linux (glibc) | x64 | `x86_64-unknown-linux-gnu` | supported on the GitHub Actions ubuntu-latest baseline |
+| macOS | x64 | `x86_64-apple-darwin` | supported |
+| macOS | arm64 | `aarch64-apple-darwin` | supported |
+
+Not currently promised in the public support matrix:
+
+- 32-bit targets
+- Windows arm64
+- Linux arm64
+- musl/static Linux targets
+
+## Installation
+
+### GitHub Releases
+
+Download the archive for your target from the GitHub Releases page, extract it, and add the binary to your `PATH`.
+
+Every release archive contains:
+
+- the `confluence` binary
+- `README.md`
+- `LICENSE`
+- a `.sha256` checksum file alongside the archive
+
+### Build from source
+
+Minimum supported Rust toolchain:
+
+```text
+Rust 1.94
+```
+
+Linux source builds may also need system packages for the keyring backend, for example:
+
+```text
+pkg-config libdbus-1-dev libsecret-1-dev
+```
+
+```text
+cargo build --release
+```
+
+Release binary output:
+
+```text
+target\release\confluence --help
+```
+
+### Install from git with cargo
+
+```text
+cargo install --git https://github.com/scc-tw/confluence-cli --bin confluence
+```
+
+## Distribution status
+
+Current repo-internal release foundation covers:
+
+- GitHub Actions CI
+- GitHub Release binaries
+- repo-local Claude skill distribution
+
+Not yet published from this repo:
+
+- crates.io
+- Homebrew tap
+- Scoop bucket
+- winget package
+- public Claude plugin marketplace package
+
+## Skill distribution
+
+This repo includes a repo-local Claude skill at:
+
+```text
+.claude/skills/confluence-cli-workflows/SKILL.md
+```
+
+That skill is currently distributed as repository content, not through a public skill registry or marketplace package.
+
+## Runtime notes
+
+- profile/login flows use the OS keyring backend when available
+- Linux source builds and CI may require system packages for the keyring backend
+- Linux binary compatibility is tested against the GitHub Actions ubuntu-latest baseline rather than every glibc variant
+- initial GitHub Release binaries are unsigned
+- mTLS transport is still not implemented
+
 ## Start here
 
 ### 1. Log in

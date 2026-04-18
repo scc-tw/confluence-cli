@@ -1,0 +1,145 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  validate-release:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate tag and Cargo.toml version
+        id: version
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          CARGO_VERSION=$(python - <<'PY'
+          from pathlib import Path
+          for line in Path('Cargo.toml').read_text().splitlines():
+              if line.startswith('version = '):
+                  print(line.split('=', 1)[1].strip().strip('"'))
+                  break
+          PY
+          )
+          if [ -z "$CARGO_VERSION" ]; then
+            echo "Failed to read package version from Cargo.toml" >&2
+            exit 1
+          fi
+          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "Tag version v$TAG_VERSION does not match Cargo.toml version $CARGO_VERSION" >&2
+            exit 1
+          fi
+          echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
+
+  build-release:
+    name: Build release (${{ matrix.name }})
+    needs: validate-release
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_ext: zip
+            binary_name: confluence.exe
+          - name: linux-x64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive_ext: tar.gz
+            binary_name: confluence
+          - name: macos-x64
+            runner: macos-13
+            target: x86_64-apple-darwin
+            archive_ext: tar.gz
+            binary_name: confluence
+          - name: macos-arm64
+            runner: macos-14
+            target: aarch64-apple-darwin
+            archive_ext: tar.gz
+            binary_name: confluence
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.94.0
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+          target: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libdbus-1-dev libsecret-1-dev
+
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.target }} --bin confluence
+
+      - name: Create staging directory
+        shell: bash
+        run: |
+          mkdir -p dist/${{ matrix.name }}
+          cp README.md dist/${{ matrix.name }}/README.md
+          cp LICENSE dist/${{ matrix.name }}/LICENSE
+          cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} dist/${{ matrix.name }}/${{ matrix.binary_name }}
+
+      - name: Create tar.gz archive
+        if: matrix.archive_ext == 'tar.gz'
+        shell: bash
+        run: |
+          ARCHIVE=confluence-${{ needs.validate-release.outputs.version }}-${{ matrix.target }}.tar.gz
+          tar -C dist/${{ matrix.name }} -czf "$ARCHIVE" .
+          shasum -a 256 "$ARCHIVE" > "$ARCHIVE.sha256"
+
+      - name: Create zip archive
+        if: matrix.archive_ext == 'zip'
+        shell: pwsh
+        run: |
+          $archive = "confluence-${{ needs.validate-release.outputs.version }}-${{ matrix.target }}.zip"
+          Compress-Archive -Path "dist/${{ matrix.name }}/*" -DestinationPath $archive
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path "$archive.sha256" -Value "$hash  $archive"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.name }}
+          path: |
+            confluence-${{ needs.validate-release.outputs.version }}-${{ matrix.target }}.${{ matrix.archive_ext }}
+            confluence-${{ needs.validate-release.outputs.version }}-${{ matrix.target }}.${{ matrix.archive_ext }}.sha256
+
+  publish-release:
+    name: Publish GitHub Release
+    needs:
+      - validate-release
+      - build-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Publish GitHub release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-artifacts/*
