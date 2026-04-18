@@ -265,13 +265,14 @@ The shell now behaves more like a small virtual filesystem over Confluence:
 - `clear` clears the visible terminal buffer
 - `mkdir` creates a folder under the current space/page parent
 - `mv` moves or renames a page or folder
-- `cp` copies a page to a new destination
+- `cp` copies a page, or recursively copies a folder-like subtree with `-r`
 - `rm` removes a page
 - `rmdir` removes an empty folder
 - `cat` reads page content (default: markdown)
 - `tail` prints the last lines of piped input or page text
 - `grep` searches page text in the current subtree
 - `find` walks the current subtree
+- `id` is an alias of `whoami`
 - `whoami` shows the active shell identity
 - `seq` prints numeric sequences
 - `sleep` delays for a duration
@@ -290,9 +291,11 @@ clear
 mkdir "Reference Docs"
 mv SPACE/12345 SPACE/Archive/12345
 cp SPACE/12345 SPACE/"Copy of 12345"
+cp -r SPACE/Folder SPACE/Folder-Copy
 rm SPACE/12345
 rmdir SPACE/"Reference Docs"
 tail -n 5 [target]
+id
 whoami
 seq 1 5
 sleep 1s

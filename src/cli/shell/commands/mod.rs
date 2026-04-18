@@ -28,6 +28,7 @@ pub fn is_registered(name: &str) -> bool {
             | "rm"
             | "rmdir"
             | "whoami"
+            | "id"
             | "seq"
             | "sleep"
             | "tail"
@@ -63,7 +64,7 @@ pub fn help_for(name: &str) -> Option<&'static str> {
         "tail" => Some(
             "tail [-n <count>|-n +<start>] [target]\n  Print the last lines of piped input or the current/target page rendered as text.",
         ),
-        "whoami" => Some(
+        "whoami" | "id" => Some(
             "whoami\n  Show the active shell identity derived from the resolved Confluence profile.",
         ),
         "seq" => Some(
@@ -91,7 +92,7 @@ pub fn execute(
         Some("rm") => rm::execute(state, argv, input),
         Some("rmdir") => rmdir::execute(state, argv, input),
         Some("tail") => tail::execute(state, argv, input),
-        Some("whoami") => whoami::execute(state, argv, input),
+        Some("whoami") | Some("id") => whoami::execute(state, argv, input),
         Some("seq") => seq::execute(state, argv, input),
         Some("sleep") => sleep::execute(state, argv, input),
         _ => unreachable!("checked by registry before dispatch"),
@@ -113,6 +114,7 @@ mod tests {
         assert!(is_registered("rm"));
         assert!(is_registered("rmdir"));
         assert!(is_registered("whoami"));
+        assert!(is_registered("id"));
         assert!(is_registered("seq"));
         assert!(is_registered("sleep"));
         assert!(is_registered("tail"));
@@ -130,6 +132,7 @@ mod tests {
         assert!(help_for("rm").unwrap().contains("Remove a page"));
         assert!(help_for("rmdir").unwrap().contains("empty folder"));
         assert!(help_for("whoami").unwrap().contains("identity"));
+        assert!(help_for("id").unwrap().contains("identity"));
         assert!(help_for("seq").unwrap().contains("sequence"));
         assert!(help_for("sleep").unwrap().contains("duration"));
         assert!(help_for("tail").unwrap().contains("last lines"));
