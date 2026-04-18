@@ -15,8 +15,8 @@ mod tests {
     use super::*;
     use crate::application::models::{
         ArchiveResult, AttachmentSummary, AttachmentUploadRequest, CommentCreateRequest,
-        CommentSummary, ContentProperty, CreatePageRequest, MovePageRequest, PageBody,
-        PageContentKind, PageSummary, SpaceSummary, UpdatePageRequest,
+        CommentSummary, ContentProperty, CreateFolderRequest, CreatePageRequest, MovePageRequest,
+        PageBody, PageContentKind, PageSummary, SpaceSummary, UpdatePageRequest,
     };
     use crate::application::runtime::{
         ensure_writable, ResolvedProfile, RuntimeConfig, RuntimeContext, RuntimeProfiles,
@@ -62,6 +62,19 @@ mod tests {
             })
         }
 
+        fn create_folder(&self, request: CreateFolderRequest) -> Result<PageSummary> {
+            Ok(PageSummary {
+                id: request
+                    .parent_id
+                    .map_or(20, |parent: crate::domain::PageId| parent.get() + 10),
+                title: request.title,
+                status: Some("current".to_owned()),
+                space_id: Some(request.space_id),
+                version: Some(1),
+                content_kind: PageContentKind::Folder,
+            })
+        }
+
         fn list_child_pages(&self, _page: &PageRef) -> Result<Vec<PageSummary>> {
             Ok(vec![PageSummary {
                 id: 2,
@@ -71,6 +84,14 @@ mod tests {
                 version: Some(1),
                 content_kind: PageContentKind::Page,
             }])
+        }
+
+        fn list_child_content(
+            &self,
+            page: &PageRef,
+            _parent_kind: PageContentKind,
+        ) -> Result<Vec<PageSummary>> {
+            self.list_child_pages(page)
         }
 
         fn get_page_info(&self, _page: &PageRef) -> Result<PageSummary> {
@@ -114,6 +135,13 @@ mod tests {
 
         fn delete_page(&self, page: &PageRef, mode: DeleteMode) -> Result<()> {
             self.deleted.borrow_mut().push((format!("{page:?}"), mode));
+            Ok(())
+        }
+
+        fn delete_folder(&self, folder: &PageRef) -> Result<()> {
+            self.deleted
+                .borrow_mut()
+                .push((format!("folder:{folder:?}"), DeleteMode::Archive));
             Ok(())
         }
 

@@ -1,4 +1,4 @@
-use httpmock::Method::{GET, POST};
+use httpmock::Method::{DELETE, GET, POST, PUT};
 use httpmock::MockServer;
 use serde_json::json;
 use std::fs;
@@ -1672,6 +1672,601 @@ fn shell_tail_rejects_piped_input_with_explicit_target() {
 }
 
 #[test]
+fn shell_mkdir_creates_folder_under_space_root() {
+    let server = MockServer::start();
+    let dir = tempdir().expect("tempdir should be created");
+    let config_path = dir.path().join("config.json");
+    write_minimal_config(&config_path);
+
+    let spaces = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/spaces")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "100",
+                "key": "ALPHA",
+                "name": "Workspace Alpha",
+                "homepageId": "1"
+            }]
+        }));
+    });
+
+    let create_folder = server.mock(|when, then| {
+        when.method(POST)
+            .path("/api/v2/folders")
+            .header("authorization", "Bearer token-123")
+            .header("content-type", "application/json")
+            .body_contains("\"spaceId\":\"100\"")
+            .body_contains("\"parentId\":\"1\"")
+            .body_contains("\"title\":\"Reference Docs\"");
+        then.status(200).json_body(json!({
+            "id": "950304787",
+            "type": "folder",
+            "status": "current",
+            "title": "Reference Docs",
+            "parentId": "1",
+            "parentType": "page",
+            "spaceId": "100",
+            "version": { "number": 1 }
+        }));
+    });
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_confluence"));
+    configure_command(&mut command, &config_path, &server);
+    let mut child = command
+        .arg("shell")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("shell should start");
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should exist")
+        .write_all(b"cd ALPHA\nmkdir \"Reference Docs\"\nexit\n")
+        .expect("shell input should be written");
+
+    let output = child
+        .wait_with_output()
+        .expect("shell output should be captured");
+    assert!(output.status.success());
+    spaces.assert();
+    create_folder.assert();
+}
+
+#[test]
+fn shell_mkdir_creates_folder_under_page_parent() {
+    let server = MockServer::start();
+    let dir = tempdir().expect("tempdir should be created");
+    let config_path = dir.path().join("config.json");
+    write_minimal_config(&config_path);
+
+    let spaces = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/spaces")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "100",
+                "key": "ALPHA",
+                "name": "Workspace Alpha",
+                "homepageId": "1"
+            }]
+        }));
+    });
+
+    let root_children = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/pages/1/direct-children")
+            .query_param("limit", "100")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "2",
+                "status": "current",
+                "title": "People Docs",
+                "type": "page",
+                "spaceId": "100",
+                "version": { "number": 1 }
+            }]
+        }));
+    });
+
+    let create_folder = server.mock(|when, then| {
+        when.method(POST)
+            .path("/api/v2/folders")
+            .header("authorization", "Bearer token-123")
+            .header("content-type", "application/json")
+            .body_contains("\"spaceId\":\"100\"")
+            .body_contains("\"parentId\":\"2\"")
+            .body_contains("\"title\":\"Attachments\"");
+        then.status(200).json_body(json!({
+            "id": "950304788",
+            "type": "folder",
+            "status": "current",
+            "title": "Attachments",
+            "parentId": "2",
+            "parentType": "page",
+            "spaceId": "100",
+            "version": { "number": 1 }
+        }));
+    });
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_confluence"));
+    configure_command(&mut command, &config_path, &server);
+    let mut child = command
+        .arg("shell")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("shell should start");
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should exist")
+        .write_all(b"cd ALPHA\ncd 2\nmkdir \"Attachments\"\nexit\n")
+        .expect("shell input should be written");
+
+    let output = child
+        .wait_with_output()
+        .expect("shell output should be captured");
+    assert!(output.status.success());
+    spaces.assert();
+    root_children.assert();
+    create_folder.assert();
+}
+
+#[test]
+fn shell_rm_removes_page_nodes() {
+    let server = MockServer::start();
+    let dir = tempdir().expect("tempdir should be created");
+    let config_path = dir.path().join("config.json");
+    write_minimal_config(&config_path);
+
+    let spaces = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/spaces")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "100",
+                "key": "ALPHA",
+                "name": "Workspace Alpha",
+                "homepageId": "1"
+            }]
+        }));
+    });
+
+    let root_children = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/pages/1/direct-children")
+            .query_param("limit", "100")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "2",
+                "status": "current",
+                "title": "People Docs",
+                "type": "page",
+                "spaceId": "100",
+                "version": { "number": 1 }
+            }]
+        }));
+    });
+
+    let delete_page = server.mock(|when, then| {
+        when.method(DELETE)
+            .path("/api/v2/pages/2")
+            .header("authorization", "Bearer token-123");
+        then.status(204);
+    });
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_confluence"));
+    configure_command(&mut command, &config_path, &server);
+    let mut child = command
+        .arg("shell")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("shell should start");
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should exist")
+        .write_all(b"rm ALPHA/2\nexit\n")
+        .expect("shell input should be written");
+
+    let output = child
+        .wait_with_output()
+        .expect("shell output should be captured");
+    assert!(output.status.success());
+    spaces.assert();
+    root_children.assert();
+    delete_page.assert();
+}
+
+#[test]
+fn shell_rmdir_requires_empty_folder() {
+    let server = MockServer::start();
+    let dir = tempdir().expect("tempdir should be created");
+    let config_path = dir.path().join("config.json");
+    write_minimal_config(&config_path);
+
+    let spaces = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/spaces")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "100",
+                "key": "ALPHA",
+                "name": "Workspace Alpha",
+                "homepageId": "1"
+            }]
+        }));
+    });
+
+    let root_children = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/pages/1/direct-children")
+            .query_param("limit", "100")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "950304787",
+                "status": "current",
+                "title": "Reference Docs",
+                "type": "folder",
+                "spaceId": "100",
+                "version": { "number": 1 }
+            }]
+        }));
+    });
+
+    let folder_children = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/folders/950304787/direct-children")
+            .query_param("limit", "100")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "2",
+                "status": "current",
+                "title": "People Docs",
+                "type": "page",
+                "spaceId": "100",
+                "version": { "number": 1 }
+            }]
+        }));
+    });
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_confluence"));
+    configure_command(&mut command, &config_path, &server);
+    let mut child = command
+        .arg("shell")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("shell should start");
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should exist")
+        .write_all(b"rmdir ALPHA/950304787\nexit\n")
+        .expect("shell input should be written");
+
+    let output = child
+        .wait_with_output()
+        .expect("shell output should be captured");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("rmdir only removes empty folders"));
+    spaces.assert();
+    root_children.assert();
+    folder_children.assert();
+}
+
+#[test]
+fn shell_rmdir_removes_empty_folder() {
+    let server = MockServer::start();
+    let dir = tempdir().expect("tempdir should be created");
+    let config_path = dir.path().join("config.json");
+    write_minimal_config(&config_path);
+
+    let spaces = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/spaces")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "100",
+                "key": "ALPHA",
+                "name": "Workspace Alpha",
+                "homepageId": "1"
+            }]
+        }));
+    });
+
+    let root_children = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/pages/1/direct-children")
+            .query_param("limit", "100")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "950304787",
+                "status": "current",
+                "title": "Reference Docs",
+                "type": "folder",
+                "spaceId": "100",
+                "version": { "number": 1 }
+            }]
+        }));
+    });
+
+    let folder_children = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/folders/950304787/direct-children")
+            .query_param("limit", "100")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({ "results": [] }));
+    });
+
+    let delete_folder = server.mock(|when, then| {
+        when.method(DELETE)
+            .path("/api/v2/folders/950304787")
+            .header("authorization", "Bearer token-123");
+        then.status(204);
+    });
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_confluence"));
+    configure_command(&mut command, &config_path, &server);
+    let mut child = command
+        .arg("shell")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("shell should start");
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should exist")
+        .write_all(b"rmdir ALPHA/950304787\nexit\n")
+        .expect("shell input should be written");
+
+    let output = child
+        .wait_with_output()
+        .expect("shell output should be captured");
+    assert!(output.status.success());
+    spaces.assert();
+    root_children.assert();
+    folder_children.assert();
+    delete_folder.assert();
+}
+
+#[test]
+fn shell_mv_renames_page_under_same_parent() {
+    let server = MockServer::start();
+    let dir = tempdir().expect("tempdir should be created");
+    let config_path = dir.path().join("config.json");
+    write_minimal_config(&config_path);
+
+    let spaces = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/spaces")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "100",
+                "key": "ALPHA",
+                "name": "Workspace Alpha",
+                "homepageId": "1"
+            }]
+        }));
+    });
+
+    let root_children = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/pages/1/direct-children")
+            .query_param("limit", "100")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "2",
+                "status": "current",
+                "title": "People Docs",
+                "type": "page",
+                "spaceId": "100",
+                "version": { "number": 1 }
+            }]
+        }));
+    });
+
+    let current = server.mock(|when, then| {
+        when.method(GET)
+            .path("/wiki/rest/api/content/2")
+            .query_param("expand", "version,space,body.storage")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "id": "2",
+            "title": "People Docs",
+            "type": "page",
+            "status": "current",
+            "space": { "id": "100", "key": "ALPHA" },
+            "version": { "number": 1 },
+            "body": { "storage": { "value": "<p>Hello</p>" } }
+        }));
+    });
+
+    let parent = server.mock(|when, then| {
+        when.method(GET)
+            .path("/wiki/rest/api/content/1")
+            .query_param("expand", "space")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "id": "1",
+            "title": "Home",
+            "type": "page",
+            "status": "current",
+            "space": { "id": "100", "key": "ALPHA" }
+        }));
+    });
+
+    let put = server.mock(|when, then| {
+        when.method(PUT)
+            .path("/wiki/rest/api/content/2")
+            .header("authorization", "Bearer token-123")
+            .body_contains("\"title\":\"Renamed Docs\"")
+            .body_contains("\"ancestors\":[{\"id\":\"1\"}]");
+        then.status(200).json_body(json!({
+            "id": "2",
+            "title": "Renamed Docs",
+            "type": "page",
+            "status": "current",
+            "space": { "id": "100", "key": "ALPHA" },
+            "version": { "number": 2 },
+            "body": { "storage": { "value": "<p>Hello</p>" } }
+        }));
+    });
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_confluence"));
+    configure_command(&mut command, &config_path, &server);
+    let mut child = command
+        .arg("shell")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("shell should start");
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should exist")
+        .write_all(b"mv ALPHA/2 ALPHA/\"Renamed Docs\"\nexit\n")
+        .expect("shell input should be written");
+
+    let output = child
+        .wait_with_output()
+        .expect("shell output should be captured");
+    assert!(output.status.success());
+    spaces.assert_hits(3);
+    root_children.assert_hits(2);
+    current.assert();
+    parent.assert();
+    put.assert();
+}
+
+#[test]
+fn shell_cp_copies_page_to_new_name() {
+    let server = MockServer::start();
+    let dir = tempdir().expect("tempdir should be created");
+    let config_path = dir.path().join("config.json");
+    write_minimal_config(&config_path);
+
+    let spaces = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/spaces")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "100",
+                "key": "ALPHA",
+                "name": "Workspace Alpha",
+                "homepageId": "1"
+            }]
+        }));
+    });
+
+    let root_children = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/pages/1/direct-children")
+            .query_param("limit", "100")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "results": [{
+                "id": "2",
+                "status": "current",
+                "title": "People Docs",
+                "type": "page",
+                "spaceId": "100",
+                "version": { "number": 1 }
+            }]
+        }));
+    });
+
+    let read_page = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v2/pages/2")
+            .query_param("body-format", "storage")
+            .header("authorization", "Bearer token-123");
+        then.status(200).json_body(json!({
+            "id": "2",
+            "status": "current",
+            "title": "People Docs",
+            "type": "page",
+            "spaceId": "100",
+            "version": { "number": 1 },
+            "body": {
+                "storage": {
+                    "value": "<p>Hello</p>",
+                    "representation": "storage"
+                }
+            }
+        }));
+    });
+
+    let create_page = server.mock(|when, then| {
+        when.method(POST)
+            .path("/api/v2/pages")
+            .header("authorization", "Bearer token-123")
+            .header("content-type", "application/json")
+            .body_contains("\"title\":\"Copy of People Docs\"")
+            .body_contains("\"spaceId\":\"100\"")
+            .body_contains("\"parentId\":\"1\"")
+            .body_contains("\"value\":\"<p>Hello</p>\"");
+        then.status(200).json_body(json!({
+            "id": "3",
+            "status": "current",
+            "title": "Copy of People Docs",
+            "type": "page",
+            "spaceId": "100",
+            "version": { "number": 1 }
+        }));
+    });
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_confluence"));
+    configure_command(&mut command, &config_path, &server);
+    let mut child = command
+        .arg("shell")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("shell should start");
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should exist")
+        .write_all(b"cp ALPHA/2 ALPHA/\"Copy of People Docs\"\nexit\n")
+        .expect("shell input should be written");
+
+    let output = child
+        .wait_with_output()
+        .expect("shell output should be captured");
+    assert!(output.status.success());
+    spaces.assert_hits(3);
+    root_children.assert_hits(2);
+    read_page.assert();
+    create_page.assert();
+}
+
+#[test]
 fn shell_rejects_stateful_builtins_in_pipelines() {
     let server = MockServer::start();
     let dir = tempdir().expect("tempdir should be created");
@@ -1818,6 +2413,11 @@ fn shell_help_shows_filesystem_commands() {
     assert!(stdout.contains("file SPACE/12345"));
     assert!(stdout.contains("stat SPACE/12345"));
     assert!(stdout.contains("clear"));
+    assert!(stdout.contains("mkdir Drafts"));
+    assert!(stdout.contains("mv SPACE/12345 SPACE/Archive/12345"));
+    assert!(stdout.contains("cp SPACE/12345 SPACE/\"Copy of 12345\""));
+    assert!(stdout.contains("rm SPACE/12345"));
+    assert!(stdout.contains("rmdir SPACE/\"Reference Docs\""));
     assert!(stdout.contains("cat [--raw|--text|--markdown|--html] [target]"));
     assert!(stdout.contains("tail -n 5 [target]"));
     assert!(stdout.contains("whoami"));

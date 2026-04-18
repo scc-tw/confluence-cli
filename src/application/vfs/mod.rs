@@ -2,7 +2,7 @@ use serde::Serialize;
 
 use crate::application::models::PageContentKind;
 use crate::domain::{PageId, PageRef};
-use crate::support::Result;
+use crate::support::{ConfluenceCliError, Result};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SpaceNode {
@@ -42,6 +42,9 @@ pub enum NodeCapability {
     Traverse,
     Search,
     Create,
+    Delete,
+    Move,
+    Copy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -74,6 +77,41 @@ pub trait VirtualFileSystem {
     fn read_dir(&self, handle: &NodeHandle) -> Result<Vec<DirEntry>>;
     fn open_child(&self, parent: &NodeHandle, name: &str) -> Result<NodeHandle>;
     fn read(&self, handle: &NodeHandle) -> Result<String>;
+
+    fn create_child(
+        &self,
+        _parent: &NodeHandle,
+        _name: &str,
+        kind: NodeKind,
+    ) -> Result<NodeHandle> {
+        Err(ConfluenceCliError::NotImplemented(format!(
+            "create_child for {kind:?}"
+        )))
+    }
+
+    fn remove_node(&self, _handle: &NodeHandle) -> Result<()> {
+        Err(ConfluenceCliError::NotImplemented("remove_node".to_owned()))
+    }
+
+    fn move_node(
+        &self,
+        handle: &NodeHandle,
+        new_parent: &NodeHandle,
+        new_name: Option<&str>,
+    ) -> Result<NodeHandle> {
+        let _ = (handle, new_parent, new_name);
+        Err(ConfluenceCliError::NotImplemented("move_node".to_owned()))
+    }
+
+    fn copy_node(
+        &self,
+        handle: &NodeHandle,
+        new_parent: &NodeHandle,
+        new_name: Option<&str>,
+    ) -> Result<NodeHandle> {
+        let _ = (handle, new_parent, new_name);
+        Err(ConfluenceCliError::NotImplemented("copy_node".to_owned()))
+    }
 }
 
 impl NodeHandle {

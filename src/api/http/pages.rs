@@ -1,8 +1,8 @@
 use reqwest::header::CONTENT_TYPE;
 
 use crate::application::models::{
-    ArchiveResult, CreatePageRequest, MovePageRequest, PageBody, PageSummary, SpaceSummary,
-    UpdatePageRequest,
+    ArchiveResult, CreateFolderRequest, CreatePageRequest, MovePageRequest, PageBody,
+    PageContentKind, PageSummary, SpaceSummary, UpdatePageRequest,
 };
 use crate::application::ports::PagesApi;
 use crate::domain::{BodyFormat, DeleteMode, MoveTarget, PageRef};
@@ -56,10 +56,41 @@ impl PagesApi for HttpConfluenceApi {
         Ok(response.into_summary())
     }
 
+    fn create_folder(&self, request: CreateFolderRequest) -> Result<PageSummary> {
+        let mut payload = serde_json::json!({
+            "spaceId": request.space_id,
+            "title": request.title,
+        });
+
+        if let Some(parent_id) = request.parent_id {
+            payload["parentId"] = serde_json::json!(parent_id.get().to_string());
+        }
+
+        let request = self.authed(
+            self.client
+                .post(self.v2_url("/folders"))
+                .header(CONTENT_TYPE, "application/json")
+                .json(&payload),
+        )?;
+        let response: PageV2 = request.send()?.error_for_status()?.json()?;
+        Ok(response.into_summary())
+    }
+
     fn list_child_pages(&self, page: &PageRef) -> Result<Vec<PageSummary>> {
+        self.list_child_content(page, PageContentKind::Page)
+    }
+
+    fn list_child_content(
+        &self,
+        page: &PageRef,
+        parent_kind: PageContentKind,
+    ) -> Result<Vec<PageSummary>> {
         let page_id = self.resolve_page_id(page)?;
-        let mut next_url =
-            Some(self.v2_url(&format!("/pages/{page_id}/direct-children?limit=100")));
+        let path = match parent_kind {
+            PageContentKind::Page => format!("/pages/{page_id}/direct-children?limit=100"),
+            PageContentKind::Folder => format!("/folders/{page_id}/direct-children?limit=100"),
+        };
+        let mut next_url = Some(self.v2_url(&path));
         let mut children = Vec::new();
 
         while let Some(url) = next_url.take() {
@@ -162,6 +193,16 @@ impl PagesApi for HttpConfluenceApi {
             request = request.query(&[("purge", "true")]);
         }
         let request = self.authed(request)?;
+        request.send()?.error_for_status()?;
+        Ok(())
+    }
+
+    fn delete_folder(&self, folder: &PageRef) -> Result<()> {
+        let folder_id = self.resolve_page_id(folder)?;
+        let request = self.authed(
+            self.client
+                .delete(self.v2_url(&format!("/folders/{folder_id}"))),
+        )?;
         request.send()?.error_for_status()?;
         Ok(())
     }

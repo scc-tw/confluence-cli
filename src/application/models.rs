@@ -57,6 +57,13 @@ pub struct CreatePageRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateFolderRequest {
+    pub title: String,
+    pub space_id: String,
+    pub parent_id: Option<PageId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdatePageRequest {
     pub page: PageRef,
     pub title: String,

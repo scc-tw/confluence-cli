@@ -1,6 +1,11 @@
 mod cat;
+mod cp;
 mod find;
 mod grep;
+mod mkdir;
+mod mv;
+mod rm;
+mod rmdir;
 mod seq;
 mod sleep;
 mod tail;
@@ -14,7 +19,18 @@ use super::CommandOutput;
 pub fn is_registered(name: &str) -> bool {
     matches!(
         name,
-        "cat" | "grep" | "find" | "whoami" | "seq" | "sleep" | "tail"
+        "cat"
+            | "grep"
+            | "find"
+            | "mkdir"
+            | "mv"
+            | "cp"
+            | "rm"
+            | "rmdir"
+            | "whoami"
+            | "seq"
+            | "sleep"
+            | "tail"
     )
 }
 
@@ -28,6 +44,21 @@ pub fn help_for(name: &str) -> Option<&'static str> {
         ),
         "find" => Some(
             "find [target] [--name <pattern>]\n  Recursively walk spaces/pages under the target subtree.",
+        ),
+        "mkdir" => Some(
+            "mkdir <target>\n  Create a folder under a space or page parent.",
+        ),
+        "mv" => Some(
+            "mv <source> <destination>\n  Move or rename a page or folder.",
+        ),
+        "cp" => Some(
+            "cp <source> <destination>\n  Copy a page to a new destination. Folder copy is not supported yet.",
+        ),
+        "rm" => Some(
+            "rm <target>\n  Remove a page by moving it to the archive/trash path.",
+        ),
+        "rmdir" => Some(
+            "rmdir <target>\n  Remove an empty folder.",
         ),
         "tail" => Some(
             "tail [-n <count>|-n +<start>] [target]\n  Print the last lines of piped input or the current/target page rendered as text.",
@@ -54,6 +85,11 @@ pub fn execute(
         Some("cat") => cat::execute(state, argv, input),
         Some("grep") => grep::execute(state, argv, input),
         Some("find") => find::execute(state, argv, input),
+        Some("mkdir") => mkdir::execute(state, argv, input),
+        Some("mv") => mv::execute(state, argv, input),
+        Some("cp") => cp::execute(state, argv, input),
+        Some("rm") => rm::execute(state, argv, input),
+        Some("rmdir") => rmdir::execute(state, argv, input),
         Some("tail") => tail::execute(state, argv, input),
         Some("whoami") => whoami::execute(state, argv, input),
         Some("seq") => seq::execute(state, argv, input),
@@ -71,6 +107,11 @@ mod tests {
         assert!(is_registered("cat"));
         assert!(is_registered("grep"));
         assert!(is_registered("find"));
+        assert!(is_registered("mkdir"));
+        assert!(is_registered("mv"));
+        assert!(is_registered("cp"));
+        assert!(is_registered("rm"));
+        assert!(is_registered("rmdir"));
         assert!(is_registered("whoami"));
         assert!(is_registered("seq"));
         assert!(is_registered("sleep"));
@@ -83,6 +124,11 @@ mod tests {
         assert!(help_for("cat").unwrap().contains("markdown"));
         assert!(help_for("grep").unwrap().contains("pattern"));
         assert!(help_for("find").unwrap().contains("--name"));
+        assert!(help_for("mkdir").unwrap().contains("folder"));
+        assert!(help_for("mv").unwrap().contains("Move or rename"));
+        assert!(help_for("cp").unwrap().contains("Copy a page"));
+        assert!(help_for("rm").unwrap().contains("Remove a page"));
+        assert!(help_for("rmdir").unwrap().contains("empty folder"));
         assert!(help_for("whoami").unwrap().contains("identity"));
         assert!(help_for("seq").unwrap().contains("sequence"));
         assert!(help_for("sleep").unwrap().contains("duration"));

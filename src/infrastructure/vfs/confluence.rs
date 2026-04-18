@@ -1,9 +1,12 @@
-use crate::application::models::{PageContentKind, PageSummary, SpaceSummary};
+use crate::application::models::{
+    CreateFolderRequest, CreatePageRequest, MovePageRequest, PageContentKind, PageSummary,
+    SpaceSummary,
+};
 use crate::application::vfs::{
     DirEntry, NodeCapability, NodeHandle, NodeKind, NodeStat, PageNode, SpaceNode,
     VirtualFileSystem,
 };
-use crate::domain::{BodyFormat, PageId, PageRef};
+use crate::domain::{BodyFormat, DeleteMode, MoveTarget, PageId, PageRef};
 use crate::support::{ConfluenceCliError, Result};
 use crate::PagesApi;
 
@@ -63,9 +66,15 @@ impl<A: PagesApi> VirtualFileSystem for ConfluenceVfs<A> {
                 let Some(homepage_id) = space.homepage_id else {
                     return Ok(Vec::new());
                 };
-                self.page_entries(&PageRef::Id(PageId::new(homepage_id)))
+                self.page_entries(
+                    &PageRef::Id(PageId::new(homepage_id)),
+                    PageContentKind::Page,
+                )
             }
-            NodeHandle::Page(page) => self.page_entries(&PageRef::Id(PageId::new(page.id))),
+            NodeHandle::Page(page) => self.page_entries(
+                &PageRef::Id(PageId::new(page.id)),
+                page.content_kind.clone(),
+            ),
         }
     }
 
@@ -114,12 +123,99 @@ impl<A: PagesApi> VirtualFileSystem for ConfluenceVfs<A> {
             ))),
         }
     }
+
+    fn create_child(&self, parent: &NodeHandle, name: &str, kind: NodeKind) -> Result<NodeHandle> {
+        if name.trim().is_empty() {
+            return Err(ConfluenceCliError::Config(
+                "node name must not be empty".to_owned(),
+            ));
+        }
+
+        let (space_id, parent_id) = self.parent_context(parent)?;
+        let node = match kind {
+            NodeKind::Folder => self.api.create_folder(CreateFolderRequest {
+                title: name.to_owned(),
+                space_id,
+                parent_id,
+            })?,
+            NodeKind::Page => self.api.create_page(CreatePageRequest {
+                title: name.to_owned(),
+                storage_body: "<p></p>".to_owned(),
+                space_id,
+                parent_id,
+            })?,
+            NodeKind::Root | NodeKind::Space => {
+                return Err(ConfluenceCliError::Config(
+                    "create_child supports page or folder kinds only".to_owned(),
+                ))
+            }
+        };
+        self.page_entry(node).map(|entry| entry.handle)
+    }
+
+    fn remove_node(&self, handle: &NodeHandle) -> Result<()> {
+        let NodeHandle::Page(page) = handle else {
+            return Err(ConfluenceCliError::Config(
+                "only pages or folders can be removed".to_owned(),
+            ));
+        };
+        match page.content_kind {
+            PageContentKind::Folder => self.api.delete_folder(&PageRef::Id(PageId::new(page.id))),
+            PageContentKind::Page => self
+                .api
+                .delete_page(&PageRef::Id(PageId::new(page.id)), DeleteMode::Archive),
+        }
+    }
+
+    fn move_node(
+        &self,
+        handle: &NodeHandle,
+        new_parent: &NodeHandle,
+        new_name: Option<&str>,
+    ) -> Result<NodeHandle> {
+        let NodeHandle::Page(page) = handle else {
+            return Err(ConfluenceCliError::Config(
+                "only pages or folders can be moved".to_owned(),
+            ));
+        };
+        let target_parent = self.parent_page_ref(new_parent)?;
+        let moved = self.api.move_page(MovePageRequest {
+            page: PageRef::Id(PageId::new(page.id)),
+            target: MoveTarget::Parent(target_parent),
+            title: new_name.map(str::to_owned),
+        })?;
+        self.page_entry(moved).map(|entry| entry.handle)
+    }
+
+    fn copy_node(
+        &self,
+        handle: &NodeHandle,
+        new_parent: &NodeHandle,
+        new_name: Option<&str>,
+    ) -> Result<NodeHandle> {
+        let NodeHandle::Page(page) = handle else {
+            return Err(ConfluenceCliError::Config(
+                "only pages or folders can be copied".to_owned(),
+            ));
+        };
+        let body = self
+            .api
+            .read_page(&PageRef::Id(PageId::new(page.id)), BodyFormat::Storage)?;
+        let (space_id, parent_id) = self.parent_context(new_parent)?;
+        let copied = self.api.create_page(CreatePageRequest {
+            title: new_name.unwrap_or(&page.title).to_owned(),
+            storage_body: body.content,
+            space_id,
+            parent_id,
+        })?;
+        self.page_entry(copied).map(|entry| entry.handle)
+    }
 }
 
 impl<A: PagesApi> ConfluenceVfs<A> {
-    fn page_entries(&self, page: &PageRef) -> Result<Vec<DirEntry>> {
+    fn page_entries(&self, page: &PageRef, parent_kind: PageContentKind) -> Result<Vec<DirEntry>> {
         self.api
-            .list_child_pages(page)?
+            .list_child_content(page, parent_kind)?
             .into_iter()
             .map(|summary| self.page_entry(summary))
             .collect()
@@ -211,12 +307,52 @@ fn page_capabilities(content_kind: &PageContentKind) -> Vec<NodeCapability> {
             NodeCapability::Read,
             NodeCapability::List,
             NodeCapability::Traverse,
+            NodeCapability::Create,
+            NodeCapability::Delete,
+            NodeCapability::Move,
+            NodeCapability::Copy,
         ],
         PageContentKind::Folder => vec![
             NodeCapability::List,
             NodeCapability::Traverse,
             NodeCapability::Search,
             NodeCapability::Create,
+            NodeCapability::Delete,
+            NodeCapability::Move,
+            NodeCapability::Copy,
         ],
+    }
+}
+
+impl<A: PagesApi> ConfluenceVfs<A> {
+    fn parent_context(&self, parent: &NodeHandle) -> Result<(String, Option<PageId>)> {
+        match parent {
+            NodeHandle::Space(space) => Ok((space.id.clone(), space.homepage_id.map(PageId::new))),
+            NodeHandle::Page(page) => Ok((
+                page.space_id.clone().ok_or_else(|| {
+                    ConfluenceCliError::Config("page parent did not expose a space id".to_owned())
+                })?,
+                Some(PageId::new(page.id)),
+            )),
+            NodeHandle::Root => Err(ConfluenceCliError::Config(
+                "root is not a writable parent".to_owned(),
+            )),
+        }
+    }
+
+    fn parent_page_ref(&self, parent: &NodeHandle) -> Result<PageRef> {
+        match parent {
+            NodeHandle::Space(space) => space
+                .homepage_id
+                .map(PageId::new)
+                .map(PageRef::Id)
+                .ok_or_else(|| {
+                    ConfluenceCliError::Config("space does not expose a homepage id".to_owned())
+                }),
+            NodeHandle::Page(page) => Ok(PageRef::Id(PageId::new(page.id))),
+            NodeHandle::Root => Err(ConfluenceCliError::Config(
+                "root is not a writable parent".to_owned(),
+            )),
+        }
     }
 }

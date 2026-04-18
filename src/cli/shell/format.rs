@@ -170,6 +170,9 @@ fn render_capabilities(capabilities: &[NodeCapability]) -> String {
             NodeCapability::Traverse => "traverse",
             NodeCapability::Search => "search",
             NodeCapability::Create => "create",
+            NodeCapability::Delete => "delete",
+            NodeCapability::Move => "move",
+            NodeCapability::Copy => "copy",
         })
         .collect::<Vec<_>>()
         .join(",")

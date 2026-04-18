@@ -263,6 +263,11 @@ The shell now behaves more like a small virtual filesystem over Confluence:
 - `file` inspects a single node
 - `stat` inspects a single node using the VFS metadata view
 - `clear` clears the visible terminal buffer
+- `mkdir` creates a folder under the current space/page parent
+- `mv` moves or renames a page or folder
+- `cp` copies a page to a new destination
+- `rm` removes a page
+- `rmdir` removes an empty folder
 - `cat` reads page content (default: markdown)
 - `tail` prints the last lines of piped input or page text
 - `grep` searches page text in the current subtree
@@ -282,6 +287,11 @@ ls -l
 file SPACE/12345
 stat SPACE/12345
 clear
+mkdir "Reference Docs"
+mv SPACE/12345 SPACE/Archive/12345
+cp SPACE/12345 SPACE/"Copy of 12345"
+rm SPACE/12345
+rmdir SPACE/"Reference Docs"
 tail -n 5 [target]
 whoami
 seq 1 5
@@ -307,6 +317,7 @@ confluence/> ls -l
 confluence/> file SPACE/12345
 confluence/> stat SPACE/12345
 confluence/> clear
+confluence/SPACE> mkdir "Reference Docs"
 confluence/> whoami
 confluence/> cd SPACE
 confluence/SPACE> ls
