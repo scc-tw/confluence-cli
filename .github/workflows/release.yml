@@ -52,23 +52,23 @@ jobs:
           - name: windows-x64
             runner: windows-latest
             target: x86_64-pc-windows-msvc
-            archive_ext: zip
             binary_name: confluence.exe
+            asset_ext: .exe
           - name: linux-x64
             runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            archive_ext: tar.gz
             binary_name: confluence
+            asset_ext: ''
           - name: macos-x64
             runner: macos-15-intel
             target: x86_64-apple-darwin
-            archive_ext: tar.gz
             binary_name: confluence
+            asset_ext: ''
           - name: macos-arm64
             runner: macos-15
             target: aarch64-apple-darwin
-            archive_ext: tar.gz
             binary_name: confluence
+            asset_ext: ''
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -91,38 +91,24 @@ jobs:
       - name: Build release binary
         run: cargo build --release --locked --target ${{ matrix.target }} --bin confluence
 
-      - name: Create staging directory
-        shell: bash
-        run: |
-          mkdir -p dist/${{ matrix.name }}
-          cp README.md dist/${{ matrix.name }}/README.md
-          cp LICENSE dist/${{ matrix.name }}/LICENSE
-          cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} dist/${{ matrix.name }}/${{ matrix.binary_name }}
-
-      - name: Create tar.gz archive
-        if: matrix.archive_ext == 'tar.gz'
-        shell: bash
-        run: |
-          ARCHIVE=confluence-${{ needs.validate-release.outputs.version }}-${{ matrix.target }}.tar.gz
-          tar -C dist/${{ matrix.name }} -czf "$ARCHIVE" .
-          shasum -a 256 "$ARCHIVE" > "$ARCHIVE.sha256"
-
-      - name: Create zip archive
-        if: matrix.archive_ext == 'zip'
+      - name: Prepare release asset
+        id: asset
         shell: pwsh
         run: |
-          $archive = "confluence-${{ needs.validate-release.outputs.version }}-${{ matrix.target }}.zip"
-          Compress-Archive -Path "dist/${{ matrix.name }}/*" -DestinationPath $archive
-          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
-          Set-Content -Path "$archive.sha256" -Value "$hash  $archive"
+          $asset = "confluence-${{ needs.validate-release.outputs.version }}-${{ matrix.target }}${{ matrix.asset_ext }}"
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary_name }}" $asset
+          $hash = (Get-FileHash $asset -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path "$asset.sha256" -NoNewline -Value "$hash  $asset"
+          "path=$asset" >> $env:GITHUB_OUTPUT
+          "checksum=$asset.sha256" >> $env:GITHUB_OUTPUT
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.name }}
           path: |
-            confluence-${{ needs.validate-release.outputs.version }}-${{ matrix.target }}.${{ matrix.archive_ext }}
-            confluence-${{ needs.validate-release.outputs.version }}-${{ matrix.target }}.${{ matrix.archive_ext }}.sha256
+            ${{ steps.asset.outputs.path }}
+            ${{ steps.asset.outputs.checksum }}
 
   publish-release:
     name: Publish GitHub Release

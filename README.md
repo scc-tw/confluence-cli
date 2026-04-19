@@ -52,14 +52,16 @@ Not currently promised in the public support matrix:
 
 ### GitHub Releases
 
-Download the archive for your target from the GitHub Releases page, extract it, and add the binary to your `PATH`.
+Download the executable for your target from the GitHub Releases page, rename it locally if you want a shorter filename, and add it to your `PATH`.
 
-Every release archive contains:
+Release asset names keep the existing version/target mangling, for example:
 
-- the `confluence` binary
-- `README.md`
-- `LICENSE`
-- a `.sha256` checksum file alongside the archive
+- `confluence-1.0.0-x86_64-pc-windows-msvc.exe`
+- `confluence-1.0.0-x86_64-unknown-linux-gnu`
+
+Each release also publishes a matching `.sha256` file.
+
+On macOS and Linux, you may need to run `chmod +x` on the downloaded file before using it.
 
 ### Build from source
 
