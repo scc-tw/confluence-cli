@@ -11,7 +11,63 @@ use httpmock::Method::{DELETE, GET, POST, PUT};
 use httpmock::{Mock, MockServer};
 use serde_json::json;
 use std::fs;
+use std::sync::{Mutex, OnceLock};
 use tempfile::tempdir;
+
+const CONFLUENCE_ENV_KEYS: &[&str] = &[
+    "CONFLUENCE_DOMAIN",
+    "CONFLUENCE_PROTOCOL",
+    "CONFLUENCE_API_PATH",
+    "CONFLUENCE_AUTH_TYPE",
+    "CONFLUENCE_EMAIL",
+    "CONFLUENCE_USERNAME",
+    "CONFLUENCE_API_TOKEN",
+    "CONFLUENCE_PASSWORD",
+    "CONFLUENCE_READ_ONLY",
+    "CONFLUENCE_PROFILE",
+];
+
+fn env_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+struct EnvGuard {
+    original: Vec<(String, Option<String>)>,
+}
+
+impl EnvGuard {
+    fn set(pairs: &[(&str, &str)]) -> Self {
+        let mut original = Vec::new();
+        for (key, value) in pairs {
+            original.push(((*key).to_owned(), std::env::var(key).ok()));
+            unsafe { std::env::set_var(key, value) };
+        }
+
+        Self { original }
+    }
+
+    fn clear(keys: &[&str]) -> Self {
+        let mut original = Vec::new();
+        for key in keys {
+            original.push(((*key).to_owned(), std::env::var(key).ok()));
+            unsafe { std::env::remove_var(key) };
+        }
+
+        Self { original }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        for (key, value) in self.original.drain(..) {
+            match value {
+                Some(value) => unsafe { std::env::set_var(&key, value) },
+                None => unsafe { std::env::remove_var(&key) },
+            }
+        }
+    }
+}
 
 fn test_profile(server: &MockServer) -> HttpApiConfig {
     HttpApiConfig {
@@ -1146,6 +1202,10 @@ fn comment_resolve_and_reopen_use_inline_comment_endpoint() {
 
 #[test]
 fn cli_profile_flag_selects_profile_for_http_requests() {
+    let _lock = env_lock().lock().expect("env lock should succeed");
+    let _clear = EnvGuard::clear(CONFLUENCE_ENV_KEYS);
+    let _set = EnvGuard::set(&[("CONFLUENCE_API_TOKEN", "token-123")]);
+
     let server = MockServer::start();
     let dir = tempdir().expect("tempdir should be created");
     let config_path = dir.path().join("config.json");
@@ -1205,6 +1265,10 @@ fn cli_profile_flag_selects_profile_for_http_requests() {
 
 #[test]
 fn cli_read_only_profile_blocks_mutation_before_http() {
+    let _lock = env_lock().lock().expect("env lock should succeed");
+    let _clear = EnvGuard::clear(CONFLUENCE_ENV_KEYS);
+    let _set = EnvGuard::set(&[("CONFLUENCE_API_TOKEN", "token-123")]);
+
     let server = MockServer::start();
     let dir = tempdir().expect("tempdir should be created");
     let config_path = dir.path().join("config.json");
