@@ -1,6 +1,6 @@
 [package]
 name = "confluence-cli"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2024"
 rust-version = "1.94"
 description = "A Rust-first Confluence CLI focused on safe content workflows"
