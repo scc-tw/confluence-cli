@@ -68,6 +68,7 @@ pub fn default_config_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ConfluenceCliError;
     use crate::application::runtime::ResolveOptions;
     use crate::infrastructure::profile_manager::{
         init_config, remove_profile, set_active_profile, upsert_profile,
@@ -76,7 +77,6 @@ mod tests {
         load_runtime, load_runtime_with_store, resolve_profile_state, resolve_profile_with_store,
     };
     use crate::secret::{MemorySecretStore, SecretKind, SecretStore};
-    use crate::ConfluenceCliError;
     use std::sync::{Mutex, OnceLock};
     use tempfile::tempdir;
 

@@ -6,7 +6,7 @@ use crate::application::models::{
 };
 use crate::domain::CommentLocation;
 
-use super::{parse_comment_location, HttpConfluenceApi};
+use super::{HttpConfluenceApi, parse_comment_location};
 
 #[derive(Debug, Deserialize)]
 pub(super) struct SpacesResponse {

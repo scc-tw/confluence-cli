@@ -1,7 +1,7 @@
-use confluence_cli::domain::{CommentLocation, MoveTarget, PageId, PageRef};
-use confluence_cli::run_from;
 use confluence_cli::AuthKind;
 use confluence_cli::ConfluenceCliError;
+use confluence_cli::domain::{CommentLocation, MoveTarget, PageId, PageRef};
+use confluence_cli::run_from;
 use confluence_cli::{AttachmentUploadRequest, CommentCreateRequest, MovePageRequest};
 use confluence_cli::{
     AttachmentsApi, CommentsApi, HttpApiConfig, HttpConfluenceApi, PageExportResult, PagesApi,

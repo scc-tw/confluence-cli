@@ -1,7 +1,7 @@
 use crate::support::{ConfluenceCliError, Result};
 
-use super::super::state::ShellState;
 use super::super::CommandOutput;
+use super::super::state::ShellState;
 
 pub fn execute(
     _state: &ShellState,
@@ -25,7 +25,7 @@ pub fn execute(
         _ => {
             return Err(ConfluenceCliError::Config(
                 "usage: seq <end> | seq <start> <end> | seq <start> <step> <end>".to_owned(),
-            ))
+            ));
         }
     };
 

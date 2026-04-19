@@ -36,7 +36,7 @@ pub trait AttachmentsApi {
     fn list_attachments(&self, page: &PageRef) -> Result<Vec<AttachmentSummary>>;
     fn download_attachment(&self, page: &PageRef, attachment_id: &str) -> Result<Vec<u8>>;
     fn upload_attachment(&self, request: AttachmentUploadRequest)
-        -> Result<Vec<AttachmentSummary>>;
+    -> Result<Vec<AttachmentSummary>>;
     fn delete_attachment(&self, page: &PageRef, attachment_id: &str) -> Result<()>;
 }
 

@@ -1,5 +1,5 @@
-use crate::application::vfs::{DirEntry, NodeCapability, NodeKind, NodeStat};
 use crate::NodeHandle;
+use crate::application::vfs::{DirEntry, NodeCapability, NodeKind, NodeStat};
 
 pub enum ListingStyle {
     Simple,
@@ -180,7 +180,7 @@ fn render_capabilities(capabilities: &[NodeCapability]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{render_listing, ListingStyle};
+    use super::{ListingStyle, render_listing};
     use crate::{DirEntry, NodeCapability, NodeHandle, NodeKind, NodeStat, PageNode, SpaceNode};
 
     #[test]

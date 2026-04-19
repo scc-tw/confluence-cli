@@ -19,7 +19,7 @@ mod tests {
         PageBody, PageContentKind, PageSummary, SpaceSummary, UpdatePageRequest,
     };
     use crate::application::runtime::{
-        ensure_writable, ResolvedProfile, RuntimeConfig, RuntimeContext, RuntimeProfiles,
+        ResolvedProfile, RuntimeConfig, RuntimeContext, RuntimeProfiles, ensure_writable,
     };
     use crate::domain::{BodyFormat, CommentLocation, DeleteMode, MoveTarget, PageId, PageRef};
     use crate::infrastructure::content_io;

@@ -1,10 +1,10 @@
+use crate::NodeHandle;
 use crate::convert::convert_text;
 use crate::domain::BodyFormat;
 use crate::support::{ConfluenceCliError, Result};
-use crate::NodeHandle;
 
-use super::super::state::ShellState;
 use super::super::CommandOutput;
+use super::super::state::ShellState;
 
 pub fn execute(
     state: &ShellState,
@@ -80,7 +80,7 @@ fn parse_args(argv: &[String]) -> Result<(TailMode, Option<String>)> {
             _ => {
                 return Err(ConfluenceCliError::Config(
                     "usage: tail [-n <count>|-n +<start>] [target]".to_owned(),
-                ))
+                ));
             }
         }
     }
@@ -104,7 +104,7 @@ fn parse_n(raw: &str) -> Result<TailMode> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_n, TailMode};
+    use super::{TailMode, parse_n};
 
     #[test]
     fn parses_last_n_mode() {

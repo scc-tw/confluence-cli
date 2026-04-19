@@ -1,3 +1,4 @@
+use crate::PagesApi;
 use crate::application::models::{
     CreateFolderRequest, CreatePageRequest, MovePageRequest, PageContentKind, PageSummary,
     SpaceSummary,
@@ -8,7 +9,6 @@ use crate::application::vfs::{
 };
 use crate::domain::{BodyFormat, DeleteMode, MoveTarget, PageId, PageRef};
 use crate::support::{ConfluenceCliError, Result};
-use crate::PagesApi;
 
 #[derive(Debug, Clone)]
 pub struct ConfluenceVfs<A> {
@@ -147,7 +147,7 @@ impl<A: PagesApi> VirtualFileSystem for ConfluenceVfs<A> {
             NodeKind::Root | NodeKind::Space => {
                 return Err(ConfluenceCliError::Config(
                     "create_child supports page or folder kinds only".to_owned(),
-                ))
+                ));
             }
         };
         self.page_entry(node).map(|entry| entry.handle)

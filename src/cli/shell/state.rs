@@ -1,7 +1,7 @@
-use crate::application::runtime::{ensure_writable, ResolvedProfile, RuntimeContext};
+use crate::GlobalArgs;
+use crate::application::runtime::{ResolvedProfile, RuntimeContext, ensure_writable};
 use crate::application::vfs::{NodeHandle, VirtualFileSystem};
 use crate::support::Result;
-use crate::GlobalArgs;
 
 use super::super::bootstrap::load_runtime_and_vfs;
 

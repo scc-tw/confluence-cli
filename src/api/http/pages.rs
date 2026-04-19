@@ -9,7 +9,7 @@ use crate::domain::{BodyFormat, DeleteMode, MoveTarget, PageRef};
 use crate::support::{ConfluenceCliError, Result};
 
 use super::dto::{ArchiveResponse, PageChildrenResponse, PageV1, PageV2, SpacesResponse};
-use super::{validate_same_space, HttpConfluenceApi};
+use super::{HttpConfluenceApi, validate_same_space};
 
 impl PagesApi for HttpConfluenceApi {
     fn list_spaces(&self) -> Result<Vec<SpaceSummary>> {

@@ -60,12 +60,12 @@ jobs:
             archive_ext: tar.gz
             binary_name: confluence
           - name: macos-x64
-            runner: macos-13
+            runner: macos-15-intel
             target: x86_64-apple-darwin
             archive_ext: tar.gz
             binary_name: confluence
           - name: macos-arm64
-            runner: macos-14
+            runner: macos-15
             target: aarch64-apple-darwin
             archive_ext: tar.gz
             binary_name: confluence
@@ -74,7 +74,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust 1.94.0
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: 1.94.0
           target: ${{ matrix.target }}

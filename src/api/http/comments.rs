@@ -6,7 +6,7 @@ use crate::domain::{CommentLocation, PageRef};
 use crate::support::Result;
 
 use super::dto::{CommentListResponse, CommentV1, InlineCommentV2};
-use super::{comment_location_name, HttpConfluenceApi};
+use super::{HttpConfluenceApi, comment_location_name};
 
 impl CommentsApi for HttpConfluenceApi {
     fn list_comments(

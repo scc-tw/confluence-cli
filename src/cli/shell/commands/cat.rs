@@ -1,10 +1,10 @@
+use crate::NodeHandle;
 use crate::convert::convert_text;
 use crate::domain::BodyFormat;
 use crate::support::{ConfluenceCliError, Result};
-use crate::NodeHandle;
 
-use super::super::state::ShellState;
 use super::super::CommandOutput;
+use super::super::state::ShellState;
 
 pub fn execute(
     state: &ShellState,
@@ -66,7 +66,7 @@ fn parse_args(argv: &[String]) -> Result<(BodyFormat, Option<String>)> {
                     _ => {
                         return Err(ConfluenceCliError::Config(
                             "cat format must be one of: markdown, text, storage, html".to_owned(),
-                        ))
+                        ));
                     }
                 };
             }
@@ -74,7 +74,7 @@ fn parse_args(argv: &[String]) -> Result<(BodyFormat, Option<String>)> {
             _ => {
                 return Err(ConfluenceCliError::Config(
                     "usage: cat [--format <markdown|text|storage|html>] [target]".to_owned(),
-                ))
+                ));
             }
         }
     }

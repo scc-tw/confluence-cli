@@ -13,8 +13,8 @@ mod whoami;
 
 use crate::support::Result;
 
-use super::state::ShellState;
 use super::CommandOutput;
+use super::state::ShellState;
 
 pub fn is_registered(name: &str) -> bool {
     matches!(
@@ -46,21 +46,13 @@ pub fn help_for(name: &str) -> Option<&'static str> {
         "find" => Some(
             "find [target] [--name <pattern>]\n  Recursively walk spaces/pages under the target subtree.",
         ),
-        "mkdir" => Some(
-            "mkdir <target>\n  Create a folder under a space or page parent.",
-        ),
-        "mv" => Some(
-            "mv <source> <destination>\n  Move or rename a page or folder.",
-        ),
+        "mkdir" => Some("mkdir <target>\n  Create a folder under a space or page parent."),
+        "mv" => Some("mv <source> <destination>\n  Move or rename a page or folder."),
         "cp" => Some(
             "cp <source> <destination>\n  Copy a page to a new destination. Folder copy is not supported yet.",
         ),
-        "rm" => Some(
-            "rm <target>\n  Remove a page by moving it to the archive/trash path.",
-        ),
-        "rmdir" => Some(
-            "rmdir <target>\n  Remove an empty folder.",
-        ),
+        "rm" => Some("rm <target>\n  Remove a page by moving it to the archive/trash path."),
+        "rmdir" => Some("rmdir <target>\n  Remove an empty folder."),
         "tail" => Some(
             "tail [-n <count>|-n +<start>] [target]\n  Print the last lines of piped input or the current/target page rendered as text.",
         ),
@@ -70,9 +62,7 @@ pub fn help_for(name: &str) -> Option<&'static str> {
         "seq" => Some(
             "seq <end> | seq <start> <end> | seq <start> <step> <end>\n  Print a numeric sequence.",
         ),
-        "sleep" => Some(
-            "sleep <duration>\n  Delay for a duration like 1s, 250ms, 2m, or 1h.",
-        ),
+        "sleep" => Some("sleep <duration>\n  Delay for a duration like 1s, 250ms, 2m, or 1h."),
         _ => None,
     }
 }

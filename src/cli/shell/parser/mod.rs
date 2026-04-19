@@ -4,7 +4,7 @@ mod syntax;
 pub use syntax::{Pipeline, ShellLine, SimpleCommand};
 
 use crate::support::{ConfluenceCliError, Result};
-use lexer::{lex, Token};
+use lexer::{Token, lex};
 
 pub struct ShellParser;
 

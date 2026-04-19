@@ -21,16 +21,15 @@ pub use app::{
 };
 pub use application::models::{
     ArchiveResult, AttachmentSummary, AttachmentUploadRequest, CommentCreateRequest,
-    CommentSummary, ContentProperty, CreatePageRequest, MovePageRequest, PageBody,
-    PageContentKind, PageSummary, SpaceSummary, UpdatePageRequest,
+    CommentSummary, ContentProperty, CreatePageRequest, MovePageRequest, PageBody, PageContentKind,
+    PageSummary, SpaceSummary, UpdatePageRequest,
 };
+pub use application::pages::PageExportResult;
+pub use application::runtime::{ResolveOptions, ResolvedProfile, RuntimeConfig};
 pub use application::vfs::{
     DirEntry, NodeCapability, NodeHandle, NodeKind, NodeStat, PageNode, SpaceNode,
     VirtualFileSystem,
 };
-pub use application::pages::PageExportResult;
-pub use application::runtime::{ResolveOptions, ResolvedProfile, RuntimeConfig};
-pub use support::Result;
 pub use cli::{GlobalArgs, OutputFormat};
 pub use config::ConfigSecretBackend;
 pub use infrastructure::content_io::{
@@ -38,6 +37,7 @@ pub use infrastructure::content_io::{
 };
 pub use profile::AuthKind;
 pub use support::ConfluenceCliError;
+pub use support::Result;
 
 pub fn run() -> support::Result<()> {
     cli::run()

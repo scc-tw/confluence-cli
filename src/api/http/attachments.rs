@@ -5,8 +5,8 @@ use crate::application::ports::AttachmentsApi;
 use crate::domain::PageRef;
 use crate::support::{ConfluenceCliError, Result};
 
-use super::dto::{AttachmentListResponse, AttachmentV1};
 use super::HttpConfluenceApi;
+use super::dto::{AttachmentListResponse, AttachmentV1};
 
 impl AttachmentsApi for HttpConfluenceApi {
     fn list_attachments(&self, page: &PageRef) -> Result<Vec<AttachmentSummary>> {

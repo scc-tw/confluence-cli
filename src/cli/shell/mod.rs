@@ -10,8 +10,8 @@ use std::io::{BufRead, IsTerminal, Write};
 
 use crate::support::Result;
 
-use super::bootstrap::load_runtime_and_vfs;
 use super::GlobalArgs;
+use super::bootstrap::load_runtime_and_vfs;
 use parser::ShellParser;
 use state::ShellState;
 

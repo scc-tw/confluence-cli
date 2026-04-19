@@ -1,7 +1,7 @@
 use crate::support::{ConfluenceCliError, Result};
 
-use super::super::state::ShellState;
 use super::super::CommandOutput;
+use super::super::state::ShellState;
 
 pub fn execute(
     state: &ShellState,

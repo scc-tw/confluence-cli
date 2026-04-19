@@ -4,8 +4,8 @@ mod dto;
 mod pages;
 mod properties;
 
-use reqwest::blocking::{Client, RequestBuilder};
 use reqwest::Url;
+use reqwest::blocking::{Client, RequestBuilder};
 
 use crate::domain::{CommentLocation, PageId, PageRef};
 use crate::profile::AuthKind;

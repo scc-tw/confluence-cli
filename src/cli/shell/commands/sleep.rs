@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use crate::support::{ConfluenceCliError, Result};
 
-use super::super::state::ShellState;
 use super::super::CommandOutput;
+use super::super::state::ShellState;
 
 pub fn execute(
     _state: &ShellState,

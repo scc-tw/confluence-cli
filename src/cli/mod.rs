@@ -2,7 +2,7 @@ use clap::Parser;
 use std::io::{BufRead, Write};
 
 use crate::support::Result;
-use crate::{application::runtime::RuntimeContext, secret::SecretStore, ResolveOptions};
+use crate::{ResolveOptions, application::runtime::RuntimeContext, secret::SecretStore};
 
 mod args;
 mod bootstrap;

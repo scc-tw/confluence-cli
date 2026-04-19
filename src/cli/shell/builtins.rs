@@ -1,11 +1,11 @@
-use crate::support::{ConfluenceCliError, Result};
 use crate::NodeHandle;
-use terminal_size::{terminal_size, Width};
+use crate::support::{ConfluenceCliError, Result};
+use terminal_size::{Width, terminal_size};
 
 use super::commands;
-use super::format::{render_file, render_listing, ListingStyle};
+use super::format::{ListingStyle, render_file, render_listing};
 use super::state::ShellState;
-use super::{CommandOutput, ShellControl, SHELL_HELP};
+use super::{CommandOutput, SHELL_HELP, ShellControl};
 
 pub fn resolve(name: &str) -> Option<Builtin> {
     match name {
@@ -217,7 +217,7 @@ fn parse_ls_args(argv: &[String]) -> Result<(ListingStyle, Option<String>)> {
             _ => {
                 return Err(ConfluenceCliError::Config(
                     "usage: ls [-l|--long] [target]".to_owned(),
-                ))
+                ));
             }
         }
     }

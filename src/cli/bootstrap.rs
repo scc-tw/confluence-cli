@@ -3,8 +3,8 @@ use std::path::PathBuf;
 
 use crate::api::{HttpApiConfig, HttpConfluenceApi};
 use crate::application::profiles::{
-    add_or_update_profile, attach_secret_backend, init_profile, list_profiles, remove_profile,
-    use_profile, ProfileDraft, ProfileSecrets,
+    ProfileDraft, ProfileSecrets, add_or_update_profile, attach_secret_backend, init_profile,
+    list_profiles, remove_profile, use_profile,
 };
 use crate::application::runtime::{ResolveOptions, ResolvedProfile, RuntimeContext};
 use crate::application::vfs::VirtualFileSystem;
@@ -16,7 +16,7 @@ use crate::secret::{KeyringSecretStore, SecretStore};
 use crate::support::{ConfluenceCliError, Result};
 
 use super::output::{write_profiles, write_resolved_profile};
-use super::{prompt, GlobalArgs, ProfileArgs};
+use super::{GlobalArgs, ProfileArgs, prompt};
 
 pub(super) fn config_init(
     global: &GlobalArgs,

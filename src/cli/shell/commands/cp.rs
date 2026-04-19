@@ -2,8 +2,8 @@ use crate::application::models::PageContentKind;
 use crate::support::{ConfluenceCliError, Result};
 use crate::{NodeHandle, NodeKind};
 
-use super::super::state::ShellState;
 use super::super::CommandOutput;
+use super::super::state::ShellState;
 use super::mv::resolve_destination;
 
 pub fn execute(
@@ -52,7 +52,7 @@ pub fn execute(
         NodeHandle::Root => {
             return Err(ConfluenceCliError::Config(
                 "cp does not support copying the root".to_owned(),
-            ))
+            ));
         }
     }
 

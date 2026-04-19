@@ -1,6 +1,6 @@
+use crate::OutputFormat;
 use crate::domain::PageRef;
 use crate::support::Result;
-use crate::OutputFormat;
 
 use super::super::try_run_from;
 use super::state::ShellState;
